@@ -49,6 +49,12 @@
 <Key ID="STR_ALIVE_ATO_USE_UAVS_COMMENT">
     <English>Whether this commander may fly unmanned aircraft. They are adopted from the airspace like any other aircraft and need no aircrew, so a reconnaissance drone can be tasked while every pilot is busy. Set to No and drones in this airspace are left alone entirely, for anyone else to use.</English>
 </Key>
+<Key ID="STR_ALIVE_ATO_DRONE_ISR">
+    <English>Drone ISR:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_DRONE_ISR_COMMENT">
+    <English>Whether idle reconnaissance drones fly surveillance of their own accord instead of waiting to be asked. One drone at a time is sent over the synced commanders' unscouted and contested objectives, with a cooldown per objective so successive sorties sweep the map rather than circling the same place. Whatever the drone sees is reported to the commander. Requires Use Drones, and Recce among the mission types. Crewed aircraft are never sent this way.</English>
+</Key>
 <Key ID="STR_ALIVE_ATO_SORTIE_DURATION">
     <English>Sortie Duration:</English>
 </Key>

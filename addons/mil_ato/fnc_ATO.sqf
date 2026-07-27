@@ -898,6 +898,41 @@ switch(_operation) do {
 
         _result = _args;
     };
+    // Whether idle reconnaissance drones task themselves with surveillance rather
+    // than wait for a commander to ask. Default false: every other setting here
+    // shapes work the module was already going to do, this one makes it start work
+    // on its own, so it is opt-in.
+    case "droneISR": {
+        if (_args isEqualType true) then {
+            _logic setVariable [_operation, _args];
+        } else {
+            _args = _logic getVariable [_operation, false];
+        };
+        if (_args isEqualType "") then {
+            if (_args == "true") then { _args = true; } else { _args = false; };
+            _logic setVariable [_operation, _args];
+        };
+        ASSERT_TRUE(_args isEqualType true,str _args);
+
+        _result = _args;
+
+        // Console override, for turning this on or off in a running mission without
+        // touching the module. Read only - nothing here creates the global, so an
+        // untouched mission never sees it and the module attribute decides.
+        if !(isNil "ALiVE_ATO_droneISR") then {
+            _result = ALiVE_ATO_droneISR isEqualTo true;
+        };
+    };
+    // Single point of truth for "is this a drone", reachable from scopes that cannot
+    // see the file-local test - spawned threads do not inherit the caller's locals,
+    // so the airspace management loop has no other way to reach it. Duplicating the
+    // test there is exactly the drift the local one was written to prevent.
+    case "isDrone": {
+        _result = false;
+        if (!isNil "_args") then {
+            _result = [_args] call _fnc_isDroneClass;
+        };
+    };
     // Minutes allowed for a sortie. Blank or 0 keeps whatever the requesting
     // commander asked for. This single number drives the wait-for-pilot abort,
     // the target waypoint timeout, the force-launch nudge and the return-to-base
@@ -2384,7 +2419,16 @@ switch(_operation) do {
                 private _objectives = [_module,"objectives"] call ALiVE_fnc_hashGet;
                 // (_objectives select 0) call ALIVE_fnc_inspectHash;
 
+                // Keep the commander handle, not its objectives. The handle is a hash
+                // and the objective list hangs off it, so reading through the handle
+                // later gives the live picture - danger and state change constantly,
+                // and a list copied here would be a snapshot of mission start forever.
+                // Held so nothing has to walk synchronizedObjects on a timer.
+                _opcoms pushBack _module;
+
             } forEach _modules;
+
+            _logic setVariable ["syncedOPCOMs", _opcoms];
 
             [_logic, "factions", _modulesFactions] call MAINCLASS;
 
@@ -4718,6 +4762,161 @@ switch(_operation) do {
                                     };
                                 };
                             } forEach _airDefenseTargets;
+                        };
+
+                        // Drone ISR. Reconnaissance is the one mission type nothing ever
+                        // asks for unprompted - a commander requests a recce only once it
+                        // has already committed to attacking somewhere - so the recon
+                        // airframes sat on the ramp for whole missions while the commander
+                        // fought over ground it had never looked at. With this on, an idle
+                        // drone is put over that ground on the module's own initiative and
+                        // what it sees comes back through the recce report path.
+                        //
+                        // Every gate below must pass, and the first is off by default, so a
+                        // mission that has not asked for this behaves exactly as before.
+                        // The Recce gate is also the scarcity interlock: while airframes are
+                        // scarce the type list is narrowed to CAP and DCA, so ISR stops for
+                        // as long as the commander cannot spare an aircraft, and resumes by
+                        // itself when the list is restored.
+                        if ([_logic,"droneISR"] call MAINCLASS
+                            && {[_logic,"useUAVs"] call MAINCLASS}
+                            && {"Recce" in ([_logic,"types"] call MAINCLASS)}) then {
+
+                            // One self-tasked sortie at a time. A drone on task cannot
+                            // answer a real request, and a queue of sorties the module
+                            // asked itself for would crowd out the commander's own.
+                            private _isrEventQueue = [_logic, "eventQueue"] call MAINCLASS;
+                            private _recceCount = 0;
+                            {
+                                private _queuedData = [_x,"data",[]] call ALiVE_fnc_hashGet;
+                                if (count _queuedData > 0 && {(_queuedData select 0) == "Recce"}) then {
+                                    _recceCount = _recceCount + 1;
+                                };
+                            } forEach (_isrEventQueue select 2);
+
+                            if (_recceCount == 0) then {
+
+                                // An idle reconnaissance drone has to exist before an
+                                // objective is even considered. This gate is the whole of
+                                // the drone-only guarantee: asset selection merely prefers
+                                // drones for reconnaissance and falls back to a crewed
+                                // aircraft, and sending somebody's aircrew up on a sortie
+                                // nobody asked for is not this feature's business.
+                                private _isrAssets = [_logic,"assets"] call MAINCLASS;
+                                private _droneReady = false;
+                                {
+                                    private _isrAsset = [_isrAssets,_x] call ALiVE_fnc_hashGet;
+                                    if (!isNil "_isrAsset" && {!_droneReady}) then {
+                                        // Same maintenance window the sortie assignment uses.
+                                        private _maintenanceTime = [_isrAsset,"maintenance",0] call ALiVE_fnc_hashGet;
+                                        private _underMaintenance = (time < (_maintenanceTime + (180 + random 600))) && (time > 600);
+                                        if (([_isrAsset,"currentOp",""] call ALiVE_fnc_hashGet) == ""
+                                            && {!_underMaintenance}
+                                            && {"Recon" in ([_isrAsset,"roles",[]] call ALiVE_fnc_hashGet)}
+                                            && {[_logic,"isDrone",[_isrAsset,"vehicleClass",""] call ALiVE_fnc_hashGet] call MAINCLASS}) then {
+                                            _droneReady = true;
+                                        };
+                                    };
+                                } forEach (_isrAssets select 1);
+
+                                if (_droneReady) then {
+
+                                    // Where the drone has already been. Objective ID against
+                                    // the time it was surveyed, so successive sorties sweep
+                                    // the map instead of circling the first objective that
+                                    // qualifies - which is what would happen otherwise,
+                                    // because a single overflight rarely settles the danger
+                                    // rating and the objective stays a candidate.
+                                    private _isrVisited = _logic getVariable "isrVisited";
+                                    if (isNil "_isrVisited") then {
+                                        _isrVisited = [] call ALiVE_fnc_hashCreate;
+                                        _logic setVariable ["isrVisited", _isrVisited];
+                                    };
+
+                                    // Read the objectives through the commander handles kept
+                                    // at startup rather than a copy, so danger and state are
+                                    // whatever they are now.
+                                    //
+                                    // Two things are worth looking at: ground nobody has
+                                    // assessed (danger -1, the value objectives start at and
+                                    // are reset to), and ground a commander is currently
+                                    // fighting over. The in-progress states are gerunds -
+                                    // "attacking", "defending" - and matching "attack" or
+                                    // "defend" here would silently never fire.
+                                    private _bestObjective = [];
+                                    private _bestScore = -1;
+                                    {
+                                        private _opcomObjectives = [_x,"objectives",[]] call ALiVE_fnc_hashGet;
+                                        {
+                                            private _objective = _x;
+                                            private _objectiveID = [_objective,"objectiveID",""] call ALiVE_fnc_hashGet;
+                                            private _danger = [_objective,"danger",-1] call ALiVE_fnc_hashGet;
+                                            private _opcomState = [_objective,"opcom_state",""] call ALiVE_fnc_hashGet;
+                                            private _unscouted = _danger < 0;
+                                            private _contested = _opcomState in ["attacking","defending"];
+                                            private _lastVisit = [_isrVisited,_objectiveID,0] call ALiVE_fnc_hashGet;
+
+                                            if (_objectiveID != ""
+                                                && {_unscouted || _contested}
+                                                && {_lastVisit == 0 || {(time - _lastVisit) > 1800}}) then {
+                                                // Unscouted ground first, then whatever has gone
+                                                // longest without a look. Lower score wins.
+                                                private _score = (if (_unscouted) then {0} else {1000000}) + _lastVisit;
+                                                if (_bestScore < 0 || {_score < _bestScore}) then {
+                                                    _bestScore = _score;
+                                                    _bestObjective = [_objectiveID, [_objective,"center",[]] call ALiVE_fnc_hashGet, [_objective,"size",200] call ALiVE_fnc_hashGet];
+                                                };
+                                            };
+                                        } forEach _opcomObjectives;
+                                    } forEach (_logic getVariable ["syncedOPCOMs", []]);
+
+                                    if (count _bestObjective > 0) then {
+                                        _bestObjective params ["_isrID","_isrCenter","_isrSize"];
+
+                                        // A building at the objective, not an empty target
+                                        // list. Sortie assignment reads the loiter point off
+                                        // the first target and only falls back to the airspace
+                                        // centre for a patrol, so a recce with no target flies
+                                        // over its own airfield. Same approach the ground
+                                        // commander's own recce request takes.
+                                        private _isrTargets = [];
+                                        private _isrBuildings = nearestObjects [_isrCenter, ["House_F"], _isrSize max 200];
+                                        if (count _isrBuildings > 0) then {
+                                            _isrTargets = [_isrBuildings select 0];
+                                        };
+
+                                        if (count _isrTargets > 0) then {
+                                            // Matching the ground commander's own recce
+                                            // request: weapons held, high and slow, and a
+                                            // fuel reserve deep enough to get home.
+                                            private _isrArgs = [
+                                                "GREEN",            // ROE
+                                                1200,               // HEIGHT
+                                                "NORMAL",           // SPEED MODE
+                                                0.1,                // MIN WEAPON STATE
+                                                0.75,               // MIN FUEL STATE
+                                                1000,               // RADIUS
+                                                15,                 // DURATION in minutes
+                                                _isrTargets         // TARGETS
+                                            ];
+                                            private _isrEvent = ['ATO_REQUEST', ["Recce", _side, _faction, _isrCenter, _isrArgs],"ATO"] call ALIVE_fnc_event;
+                                            private _isrEventID = [ALIVE_eventLog, "addEvent",_isrEvent] call ALIVE_fnc_eventLog;
+
+                                            // Stamped on request, not on completion: a sortie
+                                            // that never launches must still move the sweep on,
+                                            // or a single unreachable objective would be picked
+                                            // again on every pass forever.
+                                            [_isrVisited, _isrID, time] call ALiVE_fnc_hashSet;
+
+                                            // DEBUG -------------------------------------------------------------------------------------
+                                            if(_debug) then {
+                                                ["ATO %1 - Drone ISR tasked over objective %2 at %3", _logic, _isrID, mapGridPosition _isrCenter] call ALiVE_fnc_dump;
+                                            };
+                                            // DEBUG -------------------------------------------------------------------------------------
+                                        };
+                                    };
+                                };
+                            };
                         };
                     };
 
