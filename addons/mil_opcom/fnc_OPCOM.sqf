@@ -598,7 +598,8 @@ switch (_operation) do {
     
         private _listenerID = [ALiVE_eventLog, "addListener", [_logic, [
             "PROFILE_ATTACK_START",
-            "PROFILE_ATTACK_END"
+            "PROFILE_ATTACK_END",
+            "ATO_RECON"
         ]]] call ALiVE_fnc_eventLog;
         [_logic,"listenerID", _listenerID] call ALiVE_fnc_hashSet;
     };
@@ -618,6 +619,18 @@ switch (_operation) do {
 
                 if (_opcomSide == _attackerSide) then {
                     [_logic,"createSpotrepForProfiles", _targets] call MAINCLASS;
+                };
+            };
+
+            // Air reconnaissance report from a Military Air Component Commander.
+            // The side carried on the event is the side that flew the sortie, so
+            // the match keeps a friendly ATO's findings inside its own chain of
+            // command rather than handing them to every commander on the map.
+            case "ATO_RECON": {
+                _eventData params ["_reconSide","_reconFaction","_reconPosition","_sightedProfiles"];
+
+                if (_opcomSide == _reconSide) then {
+                    [_logic,"createSpotrepForProfiles", _sightedProfiles] call MAINCLASS;
                 };
             };
 
