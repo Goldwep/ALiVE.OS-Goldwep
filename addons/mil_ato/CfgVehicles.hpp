@@ -225,6 +225,21 @@ class CfgVehicles
                             class No { name = "No"; value = false; };
                         };
                 };
+                // Off by default: this is the only setting that makes the commander
+                // task itself rather than answer a request, so it has to be asked for.
+                // Needs Use Drones on and Recce in the mission types to do anything.
+                class droneISR : Combo
+                {
+                        property = "ALiVE_mil_ato_droneISR";
+                        displayName = "$STR_ALIVE_ATO_DRONE_ISR";
+                        tooltip = "$STR_ALIVE_ATO_DRONE_ISR_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class Yes { name = "Yes"; value = true; };
+                            class No { name = "No"; value = false; default = 1; };
+                        };
+                };
                 // Tempo controls. Both blank by default and blank means "as before",
                 // so an untouched mission is byte-identical in behaviour.
                 class sortieDuration : Edit
