@@ -682,6 +682,23 @@ switch(_operation) do {
 
         _result = _args;
     };
+    // Whether an enemy aeroplane raised by a synced commander is answered with
+    // DCA rather than CAS. Default false - DCA needs a Fighter-role airframe and
+    // a faction without one gets a denial with no fallback sortie.
+    case "counterAir": {
+        if (_args isEqualType true) then {
+            _logic setVariable [_operation, _args];
+        } else {
+            _args = _logic getVariable [_operation, false];
+        };
+        if (_args isEqualType "") then {
+            if (_args == "true") then { _args = true; } else { _args = false; };
+            _logic setVariable [_operation, _args];
+        };
+        ASSERT_TRUE(_args isEqualType true,str _args);
+
+        _result = _args;
+    };
     case "resupply": {
         if (_args isEqualType true) then {
             _logic setVariable [_operation, _args];
@@ -1739,6 +1756,10 @@ switch(_operation) do {
             [_logic,"generateTasks", _logic getVariable ["generateTasks", false]] call MAINCLASS;
             [_logic,"generateSEADTasks", _logic getVariable ["generateSEADTasks", false]] call MAINCLASS;
 
+            // publish the counter-air lever per served side so OPCOM's contact
+            // response reads this commander's setting, not another module's
+            missionNamespace setVariable [format ["ALIVE_MilATO_counterAir_%1", toUpper str _side], [_logic,"counterAir", _logic getVariable ["counterAir", false]] call MAINCLASS];
+
             [_logic, "assets",[] call ALiVE_fnc_hashCreate] call MAINCLASS;
             [_logic,"airspaceAssets",[] call ALiVE_fnc_hashCreate] call MAINCLASS;
             [_logic,"runways",[] call ALiVE_fnc_hashCreate] call MAINCLASS;
@@ -1804,6 +1825,7 @@ switch(_operation) do {
                 ["ATO - Resupply: %1",[_logic, "resupply"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Generate Tasks: %1",[_logic, "generateTasks"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Generate SEAD Tasks: %1",[_logic, "generateSEADTasks"] call MAINCLASS] call ALiVE_fnc_dump;
+                ["ATO - Counter Air: %1",[_logic, "counterAir"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Start Position: %1",[_logic, "runwaystartpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway End Position: %1",[_logic, "runwayendpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Width: %1",[_logic, "runwaywidth"] call MAINCLASS] call ALiVE_fnc_dump;

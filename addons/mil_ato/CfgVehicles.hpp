@@ -153,6 +153,22 @@ class CfgVehicles
                             class Yes { name = "Yes"; value = true; };
                         };
                 };
+                // Off by default: DCA needs a Fighter-role airframe, and a faction
+                // that catalogues none answers an interception request with a silent
+                // denial and no fallback. Only the target's own profile decides -
+                // helicopters and ground contacts keep CAS either way.
+                class counterAir : Combo
+                {
+                        property = "ALiVE_mil_ato_counterAir";
+                        displayName = "$STR_ALIVE_ATO_COUNTER_AIR";
+                        tooltip = "$STR_ALIVE_ATO_COUNTER_AIR_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
                 // Defaults to Yes. Ground forces are reinforced through the Logistics
                 // Commander as a matter of course, so air was the only arm that could
                 // only ever shrink - every loss permanent, and a commander with nothing

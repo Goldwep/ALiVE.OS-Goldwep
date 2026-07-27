@@ -139,6 +139,12 @@
 <Key ID="STR_ALIVE_ATO_GENERATE_SEADTASKS_COMMENT">
     <English>MACC does not send AI aircraft against detected anti-air sites. This only creates a player Air Tasking Order for them, and needs the C2ISTAR module. Leave this off and detected anti-air is recorded but never engaged.</English>
 </Key>
+<Key ID="STR_ALIVE_ATO_COUNTER_AIR">
+    <English>Counter Air:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_COUNTER_AIR_COMMENT">
+    <English>Answers an enemy aeroplane spotted by a synced Military AI Commander with an interception sortie instead of a ground-attack one. Needs a faction with a fighter airframe - without one the request is denied and nothing flies. Helicopters and ground targets are unaffected.</English>
+</Key>
 <Key ID="STR_ALIVE_ATO_RESUPPLY">
     <English>Resupply:</English>
     <Chinesesimp>重新补给</Chinesesimp>
