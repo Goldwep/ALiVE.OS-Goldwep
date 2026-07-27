@@ -151,6 +151,12 @@
 <Key ID="STR_ALIVE_ATO_GENERATE_SEADTASKS_COMMENT">
     <English>MACC does not send AI aircraft against detected anti-air sites. This only creates a player Air Tasking Order for them, and needs the C2ISTAR module. Leave this off and detected anti-air is recorded but never engaged.</English>
 </Key>
+<Key ID="STR_ALIVE_ATO_ENABLE_AI_SEAD">
+    <English>AI SEAD Missions:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_ENABLE_AI_SEAD_COMMENT">
+    <English>MACC flies its own suppression missions against enemy air defence. Only confirmed shooters and static SAM or AAA launchers are prosecuted, never ordinary gun vehicles, and each tasking sends two aircraft at high altitude for a short pass. If either aircraft is lost the other is recalled, the site is left alone for an hour, and the ground commander is asked to destroy it instead. Off by default - this spends aircraft.</English>
+</Key>
 <Key ID="STR_ALIVE_ATO_RESUPPLY">
     <English>Resupply:</English>
     <Chinesesimp>重新补给</Chinesesimp>

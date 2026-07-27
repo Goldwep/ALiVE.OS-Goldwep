@@ -172,6 +172,25 @@ class CfgVehicles
                             class Yes { name = "Yes"; value = true; };
                         };
                 };
+                // The AI SEAD sortie has been commented out of the source for years
+                // with the note that aircraft get owned by AA, so suppression was
+                // whatever players chose to do about the setting above. Turning this
+                // on flies it again, but only against air defences the commander is
+                // confident about, at standoff, and two airframes at a time - and a
+                // package that does not come back bars the target and hands it to the
+                // ground commander. Off by default: it spends aircraft.
+                class enableAISEAD : Combo
+                {
+                        property = "ALiVE_mil_ato_enableAISEAD";
+                        displayName = "$STR_ALIVE_ATO_ENABLE_AI_SEAD";
+                        tooltip = "$STR_ALIVE_ATO_ENABLE_AI_SEAD_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
                 // Defaults to Yes. Ground forces are reinforced through the Logistics
                 // Commander as a matter of course, so air was the only arm that could
                 // only ever shrink - every loss permanent, and a commander with nothing
