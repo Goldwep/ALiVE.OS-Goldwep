@@ -61,11 +61,18 @@ Tupolov & Jman
 #define DEFAULT_MIN_WEAP_STATE 0.5
 #define DEFAULT_MIN_FUEL_STATE 0.5
 #define DEFAULT_RADAR_HEIGHT 105
+// Spawned objects only, matching what the scans could see before profiles were
+// an option at all.
+#define DEFAULT_RADAR_COVERAGE "spawned"
 #define DEFAULT_WAIT_TIME 60
 #define WAIT_TIME_CAS 10
 #define WAIT_TIME_DCA 30
 #define WAIT_TIME_CAP 60
 #define WAIT_TIME_SEAD 60
+// How long a target stays barred from AI SEAD after a package was lost against
+// it. Expires rather than being permanent, so a long campaign can try the site
+// again once the air picture has moved on.
+#define SEAD_DENIAL_TIMEOUT 3600
 #define WAIT_TIME_Strike 90
 #define WAIT_TIME_Recce 90
 #define CHANCE_OF_RESCUE 1
@@ -716,6 +723,53 @@ switch(_operation) do {
             default { [0, 0] };
         };
     };
+    // Whether the commander flies SEAD itself, as opposed to only asking players
+    // to. Off by default. The AI sortie was commented out for years because the
+    // aircraft got owned by AA, and even at standoff parameters it trades
+    // airframes for air defences, so this is a deliberate opt-in.
+    // A defined ALiVE_ATO_enableAISEAD outranks the attribute, so it can be
+    // switched on a running server from the console without editing the mission.
+    // isNil guarded: the override only applies once somebody sets it.
+    case "enableAISEAD": {
+        private _isSet = _args isEqualType true || {_args isEqualType ""};
+
+        if (_args isEqualType "") then {
+            _args = (_args == "true");
+        };
+
+        if (_isSet) then {
+            _logic setVariable ["enableAISEAD", _args];
+        } else {
+            _args = _logic getVariable ["enableAISEAD", false];
+        };
+
+        ASSERT_TRUE(_args isEqualType true,str _args);
+
+        _result = _args;
+
+        if (!_isSet && {!isNil "ALiVE_ATO_enableAISEAD"}) then {
+            if (ALiVE_ATO_enableAISEAD isEqualType true) then {
+                _result = ALiVE_ATO_enableAISEAD;
+            };
+        };
+    };
+    // Live AI SEAD packages, keyed by package id: [[eventIDs], targetIdent, time].
+    // Lazily created and mutated in place, so callers hold the module's own hash
+    // rather than a copy of it.
+    case "seadPackages": {
+        if (isNil {_logic getVariable "seadPackages"}) then {
+            _logic setVariable ["seadPackages", [] call ALiVE_fnc_hashCreate];
+        };
+        _result = _logic getVariable "seadPackages";
+    };
+    // Targets a SEAD package has already been lost against, keyed by target
+    // identity to the time of the loss. Same lazy-create contract as above.
+    case "seadDenied": {
+        if (isNil {_logic getVariable "seadDenied"}) then {
+            _logic setVariable ["seadDenied", [] call ALiVE_fnc_hashCreate];
+        };
+        _result = _logic getVariable "seadDenied";
+    };
     case "resupply": {
         if (_args isEqualType true) then {
             _logic setVariable [_operation, _args];
@@ -907,6 +961,22 @@ switch(_operation) do {
     case "minAssetsForOffensive": {
         _result = [_logic, _operation, _args, ""] call ALIVE_fnc_OOsimpleOperation;
     };
+    // "spawned" keeps the airspace and air defence scans on the vehicles array
+    // alone, which is all they ever read; "profiles" additionally sweeps enemy
+    // vehicle profiles inside the airspace. Limited to those two values, so a
+    // typo falls back to the pre-existing behaviour rather than to nothing.
+    // A defined ALiVE_ATO_radarCoverage outranks the attribute, so coverage can
+    // be switched on a running server from the console without editing the
+    // mission. isNil guarded: the override only applies once somebody sets it.
+    case "radarCoverage": {
+        _result = [_logic,_operation,_args,DEFAULT_RADAR_COVERAGE,["spawned","profiles"]] call ALIVE_fnc_OOsimpleOperation;
+
+        if (!(_args isEqualType "") && {!isNil "ALiVE_ATO_radarCoverage"}) then {
+            if (ALiVE_ATO_radarCoverage in ["spawned","profiles"]) then {
+                _result = ALiVE_ATO_radarCoverage;
+            };
+        };
+    };
     case "objectiveObjectsChance": {
         _result = [_logic, _operation, _args, "100"] call ALIVE_fnc_OOsimpleOperation;
     };
@@ -1058,6 +1128,50 @@ switch(_operation) do {
             };
         } forEach vehicles;
 
+        // The vehicles array holds spawned objects only, so on a virtualised
+        // battlefield the sweep above sees a fraction of the enemy air picture.
+        // With radar coverage set to all profiles, sweep the profiles inside each
+        // airspace as well. getNearProfiles is radial and an airspace marker is a
+        // rectangle, so the radius has to reach the marker's corners and the inArea
+        // test puts the rectangle back.
+        if (([_logic,"radarCoverage"] call MAINCLASS) == "profiles") then {
+            private _enemySides = [_logic,"enemySides"] call MAINCLASS;
+
+            {
+                private _marker = _x;
+                private _markerSize = getMarkerSize _marker;
+                private _radius = ((_markerSize select 0) max (_markerSize select 1)) * 1.5;
+                private _nearProfiles = [getMarkerPos _marker, _radius, [_enemySides,"vehicle",["Plane","Helicopter"]]] call ALIVE_fnc_getNearProfiles;
+
+                {
+                    private _profile = _x;
+                    private _bogeyPos = [_profile,"position",[0,0,0]] call ALiVE_fnc_hashGet;
+
+                    // An active profile is a spawned aircraft that the pass above has
+                    // already reported, so report the same object rather than an id -
+                    // pushBackUnique then de-duplicates it - and read its live altitude,
+                    // because a profile's stored position only catches up on despawn. A
+                    // virtual one is reported by profile id, which the request pipeline
+                    // resolves and spawns when the interceptors arrive, and its stored
+                    // position is the only altitude there is to gate on.
+                    private _bogey = [_profile,"profileID",""] call ALiVE_fnc_hashGet;
+                    if ([_profile,"active",false] call ALiVE_fnc_hashGet) then {
+                        private _vehicle = [_profile,"vehicle",objNull] call ALiVE_fnc_hashGet;
+                        _bogey = _vehicle;
+                        if !(isNull _vehicle) then {_bogeyPos = getPosATL _vehicle};
+                    };
+
+                    private _bogeyValid = if (_bogey isEqualType objNull) then {!isNull _bogey} else {_bogey != ""};
+
+                    if (_bogeyValid && {(_bogeyPos select 2) > DEFAULT_RADAR_HEIGHT} && {_bogeyPos inArea _marker}) then {
+                        private _tmp = [_intruders, _marker, []] call ALiVE_fnc_hashGet;
+                        _tmp pushBackUnique _bogey;
+                        [_intruders, _marker, _tmp] call ALiVE_fnc_hashSet;
+                    };
+                } forEach _nearProfiles;
+            } forEach _airspace;
+        };
+
         _result = _intruders;
     };
     case "scanAirDefenses": {
@@ -1079,7 +1193,10 @@ switch(_operation) do {
             // isAntiAir, which additionally requires the vehicle to be armed.
             // isAA itself is left alone: it also feeds the virtual damage model and
             // the commander's own assignments, which are not this scan's business.
-            if ((_vehicle iskindOf "AAA_System_01_base_F" || _vehicle iskindOf "SAM_System_01_base_F" || _vehicle iskindOf "SAM_System_02_base_F" || [_vehicle] call ALiVE_fnc_isAntiAir) && {str(side _vehicle) in _enemySides}) then {
+            // The SAM base classes are the full 01-04 set that ALiVE_fnc_listFactionAAUnits
+            // already recognises; 03 and 04 were missing here, so those launchers were
+            // only ever caught by the isAntiAir fallback.
+            if ((_vehicle iskindOf "AAA_System_01_base_F" || _vehicle iskindOf "SAM_System_01_base_F" || _vehicle iskindOf "SAM_System_02_base_F" || _vehicle iskindOf "SAM_System_03_base_F" || _vehicle iskindOf "SAM_System_04_base_F" || [_vehicle] call ALiVE_fnc_isAntiAir) && {str(side _vehicle) in _enemySides}) then {
                 private _tmpAS = [_airspace,[_vehicle],{_Input0 distance (getMarkerPos _x)},"ASCEND"] call ALiVE_fnc_SortBy;
                 private _tmp = [_airDefenses, (_tmpAS select 0), []] call ALiVE_fnc_hashGet;
                 _tmp pushbackUnique _vehicle;
@@ -1093,6 +1210,70 @@ switch(_operation) do {
                 */
             };
         } forEach vehicles;
+
+        // Same blind spot as the airspace scan: a virtualised SAM site is not in the
+        // vehicles array, so the commander's SEAD picture held only whatever happened
+        // to be spawned. With radar coverage set to all profiles, sweep enemy vehicle
+        // profiles around each airspace too. Radial rather than area-filtered, because
+        // the pass above takes air defences anywhere on the map and assigns them to the
+        // nearest airspace - this keeps that, minus the map-wide sweep the profile
+        // system cannot afford on a loop that runs every couple of minutes.
+        if (([_logic,"radarCoverage"] call MAINCLASS) == "profiles") then {
+
+            // isAntiAir reads magazine and ammo configs, which is far too expensive to
+            // repeat for every profile of the same class in the same scan.
+            private _classCache = [] call ALiVE_fnc_hashCreate;
+
+            {
+                private _marker = _x;
+                private _markerSize = getMarkerSize _marker;
+                private _radius = ((_markerSize select 0) max (_markerSize select 1)) * 1.5;
+                private _nearProfiles = [getMarkerPos _marker, _radius, [_enemySides,"vehicle"]] call ALIVE_fnc_getNearProfiles;
+
+                {
+                    private _profile = _x;
+                    private _vehicleClass = [_profile,"vehicleClass",""] call ALiVE_fnc_hashGet;
+
+                    // An empty launcher shoots at nothing. The spawned pass gets this from
+                    // the engine; for a profile the crew are the entities in command of it.
+                    private _crewed = count ([_profile,"entitiesInCommandOf",[]] call ALiVE_fnc_hashGet) > 0;
+
+                    if (_crewed && {_vehicleClass != ""}) then {
+                        private _isAirDefense = [_classCache,_vehicleClass,-1] call ALiVE_fnc_hashGet;
+                        if (_isAirDefense isEqualTo -1) then {
+                            _isAirDefense = _vehicleClass iskindOf "AAA_System_01_base_F" || _vehicleClass iskindOf "SAM_System_01_base_F" || _vehicleClass iskindOf "SAM_System_02_base_F" || _vehicleClass iskindOf "SAM_System_03_base_F" || _vehicleClass iskindOf "SAM_System_04_base_F" || [_vehicleClass] call ALiVE_fnc_isAntiAir;
+                            [_classCache,_vehicleClass,_isAirDefense] call ALiVE_fnc_hashSet;
+                        };
+
+                        if (_isAirDefense) then {
+                            // Active profiles are reported as their spawned object, matching what
+                            // the pass above put in the list so pushBackUnique can drop the
+                            // repeat; virtual ones as a profile id, which the request pipeline
+                            // resolves the same way it already does for registered threats.
+                            private _target = [_profile,"profileID",""] call ALiVE_fnc_hashGet;
+                            private _position = [_profile,"position",[0,0,0]] call ALiVE_fnc_hashGet;
+
+                            if ([_profile,"active",false] call ALiVE_fnc_hashGet) then {
+                                private _vehicle = [_profile,"vehicle",objNull] call ALiVE_fnc_hashGet;
+                                if !(isNull _vehicle) then {
+                                    _target = _vehicle;
+                                    _position = getPosATL _vehicle;
+                                };
+                            };
+
+                            private _targetValid = if (_target isEqualType objNull) then {!isNull _target} else {_target != ""};
+
+                            if (_targetValid) then {
+                                private _tmpAS = [_airspace,[_position],{_Input0 distance (getMarkerPos _x)},"ASCEND"] call ALiVE_fnc_SortBy;
+                                private _tmp = [_airDefenses, (_tmpAS select 0), []] call ALiVE_fnc_hashGet;
+                                _tmp pushbackUnique _target;
+                                [_airDefenses, (_tmpAS select 0), _tmp] call ALiVE_fnc_hashSet;
+                            };
+                        };
+                    };
+                } forEach _nearProfiles;
+            } forEach _airspace;
+        };
 
         private _threats = [GVAR(threats),str(_logic),[]] call ALiVE_fnc_hashGet;
         // Check for known AA units
@@ -1772,6 +1953,7 @@ switch(_operation) do {
 
             [_logic,"generateTasks", _logic getVariable ["generateTasks", false]] call MAINCLASS;
             [_logic,"generateSEADTasks", _logic getVariable ["generateSEADTasks", false]] call MAINCLASS;
+            [_logic,"enableAISEAD", _logic getVariable ["enableAISEAD", false]] call MAINCLASS;
 
             // publish the counter-air lever per served side so OPCOM's contact
             // response reads this commander's setting, not another module's
@@ -1849,6 +2031,8 @@ switch(_operation) do {
                 ["ATO - Generate SEAD Tasks: %1",[_logic, "generateSEADTasks"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Counter Air: %1",[_logic, "counterAir"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Air Request Rate: %1",[_logic, "airRequestRate"] call MAINCLASS] call ALiVE_fnc_dump;
+                ["ATO - Enable AI SEAD: %1",[_logic, "enableAISEAD"] call MAINCLASS] call ALiVE_fnc_dump;
+                ["ATO - Radar Coverage: %1",[_logic, "radarCoverage"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Start Position: %1",[_logic, "runwaystartpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway End Position: %1",[_logic, "runwayendpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Width: %1",[_logic, "runwaywidth"] call MAINCLASS] call ALiVE_fnc_dump;
@@ -4549,23 +4733,155 @@ switch(_operation) do {
                                     } forEach _currentOps;
 
                                     if !(_SEAD) then {
-                                        private _type = "SEAD";
-                                        private _range = 4000;
-                                        private _args = [
-                                            "RED",                // ROE
-                                            100,
-                                            "FULL",                 // SPEED MODE
-                                            DEFAULT_MIN_WEAP_STATE,
-                                            DEFAULT_MIN_FUEL_STATE,
-                                            _range * 0.9,       // RADIUS / RANGE
-                                            10,
-                                            _targets                 // TARGETS
-                                        ];
+                                        private _airspaceMarker = _x;
 
-                                        // Disabled as aircraft get owned by AA
-                                        //private _event = ['ATO_REQUEST', [_type, _side, _faction, _x, _args],"ATO"] call ALIVE_fnc_event;
-                                        //private _eventID = [ALIVE_eventLog, "addEvent",_event] call ALIVE_fnc_eventLog;
+                                        // The AI sortie used to be commented out here with the note
+                                        // "aircraft get owned by AA", and the reason was the profile it
+                                        // flew: 100m altitude, a 10 minute loiter and any contact the
+                                        // scan reported, which put a lone airframe inside the engagement
+                                        // envelope of everything it was sent against. Re-enabled behind
+                                        // enableAISEAD on three changes - only high-confidence targets,
+                                        // standoff parameters, and two airframes per tasking so the
+                                        // commander learns something from a loss instead of trickling
+                                        // singles into the same launcher.
+                                        private _enableAISEAD = [_logic,"enableAISEAD"] call MAINCLASS;
 
+                                        if (_enableAISEAD) then {
+
+                                            private _seadPackages = [_logic,"seadPackages"] call MAINCLASS;
+                                            private _seadDenied = [_logic,"seadDenied"] call MAINCLASS;
+
+                                            // Confirmed shooters. Only the IncomingMissile and hit
+                                            // handlers on this module's own aircraft write here, so an
+                                            // entry means something actually engaged us.
+                                            private _confirmedThreats = if (isNil QGVAR(threats)) then {[]} else {
+                                                [GVAR(threats), str(_logic), []] call ALiVE_fnc_hashGet
+                                            };
+
+                                            // Targets arrive as spawned objects or as profile ids
+                                            // depending on which pass of scanAirDefenses found them, and
+                                            // both have to resolve to something stable enough to key a
+                                            // denial on and to name in the escalation event.
+                                            private _fnc_targetIdent = {
+                                                params ["_target"];
+                                                private _ident = "";
+                                                if (_target isEqualType objNull) then {
+                                                    if !(isNull _target) then {
+                                                        _ident = _target getVariable ["profileID",""];
+                                                        if (_ident == "") then {_ident = str _target};
+                                                    };
+                                                } else {
+                                                    if (_target isEqualType "") then {_ident = _target};
+                                                };
+                                                _ident
+                                            };
+
+                                            private _fnc_targetClass = {
+                                                params ["_target"];
+                                                private _class = "";
+                                                if (_target isEqualType objNull) then {
+                                                    if !(isNull _target) then {_class = typeOf _target};
+                                                } else {
+                                                    if (_target isEqualType "") then {
+                                                        private _targetProfile = [ALiVE_profileHandler, "getProfile", _target] call ALiVE_fnc_ProfileHandler;
+                                                        if !(isNil "_targetProfile") then {
+                                                            _class = [_targetProfile,"vehicleClass",""] call ALiVE_fnc_hashGet;
+                                                        };
+                                                    };
+                                                };
+                                                _class
+                                            };
+
+                                            // Confidence gate. A target qualifies either because it has
+                                            // already shot at us or because it is one of the static
+                                            // launcher families - the same 01-04 SAM set plus AAA_System
+                                            // that scanAirDefenses recognises by class. A generic
+                                            // isAntiAir match is deliberately NOT enough: that test
+                                            // passes any armed hull with a high-elevation turret, and a
+                                            // ZSU is not worth a two-ship package.
+                                            private _seadTargets = [];
+                                            {
+                                                private _target = _x;
+                                                private _qualifies = _target in _confirmedThreats;
+
+                                                if (!_qualifies) then {
+                                                    private _targetClass = [_target] call _fnc_targetClass;
+                                                    if (_targetClass != "") then {
+                                                        _qualifies = _targetClass isKindOf "AAA_System_01_base_F"
+                                                            || _targetClass isKindOf "SAM_System_01_base_F"
+                                                            || _targetClass isKindOf "SAM_System_02_base_F"
+                                                            || _targetClass isKindOf "SAM_System_03_base_F"
+                                                            || _targetClass isKindOf "SAM_System_04_base_F";
+                                                    };
+                                                };
+
+                                                // A target that has already cost us a package is barred
+                                                // until the denial ages out, so a campaign that runs for
+                                                // hours can try again rather than writing the site off
+                                                // for the whole mission.
+                                                if (_qualifies) then {
+                                                    private _ident = [_target] call _fnc_targetIdent;
+                                                    if (_ident == "") then {
+                                                        _qualifies = false;
+                                                    } else {
+                                                        private _deniedTime = [_seadDenied, _ident, -1] call ALiVE_fnc_hashGet;
+                                                        if (_deniedTime >= 0) then {
+                                                            if (time - _deniedTime < SEAD_DENIAL_TIMEOUT) then {
+                                                                _qualifies = false;
+                                                            } else {
+                                                                [_seadDenied, _ident] call CBA_fnc_hashRem;
+                                                            };
+                                                        };
+                                                    };
+                                                };
+
+                                                if (_qualifies) then {_seadTargets pushBackUnique _target};
+                                            } forEach _targets;
+
+                                            if (count _seadTargets > 0) then {
+
+                                                private _type = "SEAD";
+                                                private _range = 4000;
+                                                private _packageIdent = [_seadTargets select 0] call _fnc_targetIdent;
+                                                private _packageID = format ["SEAD_%1_%2", _packageIdent, round time];
+                                                private _packageEvents = [];
+
+                                                // Two single-ship sorties rather than one, tasked
+                                                // together against the same targets. Each request is
+                                                // given its own copy of the argument array because
+                                                // ATO_REQUEST rewrites the duration in place.
+                                                for "_i" from 1 to 2 do {
+                                                    private _args = [
+                                                        "RED",                  // ROE
+                                                        1000,                   // ALTITUDE - above the short range envelope
+                                                        "FULL",                 // SPEED MODE
+                                                        0.5,
+                                                        0.5,
+                                                        _range,                 // RADIUS / RANGE
+                                                        8,                      // DURATION - short exposure
+                                                        +_seadTargets           // TARGETS
+                                                    ];
+                                                    private _event = ['ATO_REQUEST', [_type, _side, _faction, _airspaceMarker, _args],"ATO"] call ALIVE_fnc_event;
+                                                    private _eventID = [ALIVE_eventLog, "addEvent",_event] call ALIVE_fnc_eventLog;
+
+                                                    // Stamped after the id is assigned. addEvent
+                                                    // dispatches its listeners in a spawned thread and
+                                                    // the queue stores this same hash, so the stamp is
+                                                    // in place before anything reads the event.
+                                                    [_event, "packageID", _packageID] call ALiVE_fnc_hashSet;
+
+                                                    _packageEvents pushBack _eventID;
+                                                };
+
+                                                [_seadPackages, _packageID, [_packageEvents, _packageIdent, time]] call ALiVE_fnc_hashSet;
+
+                                                // DEBUG -------------------------------------------------------------------------------------
+                                                if(_debug) then {
+                                                    ["ATO %1 - AI SEAD package %2 launched against %3 target(s)", _logic, _packageID, count _seadTargets] call ALiVE_fnc_dump;
+                                                };
+                                                // DEBUG -------------------------------------------------------------------------------------
+                                            };
+                                        };
 
                                         if (count _targets > 0) then {
 
@@ -7196,7 +7512,87 @@ switch(_operation) do {
             _totalCount = _totalCount + count _eventEnemyProfiles;
         };
 
+        // A zero count here IS the airframe-gone signal - every sortie state
+        // reads it and bails to eventComplete on it. Hooking the SEAD package
+        // response at the single place that produces the answer, rather than at
+        // the six states that consume it, keeps one copy of the escalation and
+        // means a state added later gets it for free. Deliberately not inside
+        // removeUnregisteredProfiles: that is a generic profile filter with no
+        // notion of which event, or even which side, it is filtering for.
+        if (_totalCount == 0) then {
+            [_logic, "handleSEADPackageLoss", _event] call MAINCLASS;
+        };
+
         _result = _totalCount;
+    };
+
+    // A SEAD package member has been lost. Recall the other one, bar the target
+    // and tell the ground commander about it.
+    case "handleSEADPackageLoss": {
+
+        private _event = _args;
+        if !(_event isEqualType []) exitWith {};
+
+        private _packageID = [_event, "packageID", ""] call ALiVE_fnc_hashGet;
+        if (_packageID == "") exitWith {};
+
+        private _seadPackages = [_logic,"seadPackages"] call MAINCLASS;
+        private _package = [_seadPackages, _packageID, []] call ALiVE_fnc_hashGet;
+
+        // Already handled - the surviving airframe reporting its own loss later
+        // must not raise a second escalation for the same package.
+        if (count _package == 0) exitWith {};
+
+        _package params ["_packageEvents", "_packageIdent", "_packageTime"];
+
+        private _debug = [_logic, "debug"] call MAINCLASS;
+        private _eventID = [_event, "id"] call ALiVE_fnc_hashGet;
+        private _eventData = [_event, "data"] call ALiVE_fnc_hashGet;
+        private _eventSide = _eventData select 1;
+        private _eventFaction = _eventData select 2;
+
+        // Remove the package first so nothing below can re-enter this.
+        [_seadPackages, _packageID] call CBA_fnc_hashRem;
+
+        // Recall the survivor. The ATO_CANCEL_REQUEST path is not usable here:
+        // it only ever walks events with playerRequested set, and what it does to
+        // the ones it matches is a teardown - destroy every profile, deleteVehicle
+        // every asset, then eventComplete - which would make an airborne aircraft
+        // vanish. The state machine's own way home is the aircraftReturn state, so
+        // that is what a recall means. Only sorties that are actually airborne are
+        // moved; one still starting up has no flight to break off and is left to
+        // run its course.
+        private _eventQueue = [_logic, "eventQueue"] call MAINCLASS;
+        {
+            private _otherID = _x;
+            if (_otherID != _eventID) then {
+                private _otherEvent = [_eventQueue, _otherID] call ALiVE_fnc_hashGet;
+                if !(isNil "_otherEvent") then {
+                    private _otherState = [_otherEvent, "state", ""] call ALiVE_fnc_hashGet;
+                    if (_otherState in ["aircraftTravel","aircraftExecuteWait"]) then {
+                        [_otherEvent, "state", "aircraftReturn"] call ALiVE_fnc_hashSet;
+                        [_eventQueue, _otherID, _otherEvent] call ALiVE_fnc_hashSet;
+                    };
+                };
+            };
+        } forEach _packageEvents;
+
+        // Bar the target. Nothing else will be sent against it until the denial
+        // ages out, whether or not the escalation below finds anyone to answer it.
+        if (_packageIdent != "") then {
+            private _seadDenied = [_logic,"seadDenied"] call MAINCLASS;
+            [_seadDenied, _packageIdent, time] call ALiVE_fnc_hashSet;
+        };
+
+        // Hand the problem to the ground commander.
+        private _failedEvent = ['ATO_SEAD_FAILED', [_eventSide, _eventFaction, _packageIdent],"ATO"] call ALIVE_fnc_event;
+        [ALIVE_eventLog, "addEvent", _failedEvent] call ALIVE_fnc_eventLog;
+
+        // DEBUG -------------------------------------------------------------------------------------
+        if(_debug) then {
+            ["ATO %1 - AI SEAD package %2 lost against %3, escalating", _logic, _packageID, _packageIdent] call ALiVE_fnc_dump;
+        };
+        // DEBUG -------------------------------------------------------------------------------------
     };
 
     // Remove profiles that are nolonger valid

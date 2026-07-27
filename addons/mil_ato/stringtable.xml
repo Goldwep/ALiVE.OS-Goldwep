@@ -126,6 +126,18 @@
 <Key ID="STR_ALIVE_ATO_PLACE_AIR_COMMENT">
     <English>If fewer than two armed aircraft start inside this module's airspace, extra ones are placed at the nearest airbase or helipad. Startup only - replacing later losses is what Resupply does. Has no effect on a carrier. Beware: with this off and no armed aircraft at all in the airspace, MACC never starts and nothing is tasked for the whole mission.</English>
 </Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE">
+    <English>Radar Coverage:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE_COMMENT">
+    <English>What the air commander can see. Spawned aircraft only means the airspace and air defence scans see nothing that has not spawned in, so on a virtualised battlefield most enemy air and most enemy anti-air never registers - no interception, no SEAD picture. All profiles adds virtualised enemy aircraft and crewed air defence inside this module's airspace, at the cost of a profile sweep on every scan.</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE_SPAWNED">
+    <English>Spawned aircraft only</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE_PROFILES">
+    <English>All profiles</English>
+</Key>
 <Key ID="STR_ALIVE_ATO_GENERATE_TASKS">
     <English>Generate Player Tasks:</English>
     <Chinesesimp>生成玩家任务</Chinesesimp>
@@ -150,6 +162,12 @@
 </Key>
 <Key ID="STR_ALIVE_ATO_AIR_REQUESTRATE_COMMENT">
     <English>How many known enemy contacts commanders call air on per scan. Normal keeps today's behaviour - the single contact that triggered the response. High fans up to 2 sorties per scan across the densest known contact clusters on a 300 s cooldown each; Surge up to 3 on a 180 s cooldown. Targets are classified as they are today - aeroplanes draw interception when Counter Air is on, everything else ground attack. Every fanned sortie spawns its target's profile, so raise this with the mission's virtualization budget in mind. Needs an OPCOM.</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_ENABLE_AI_SEAD">
+    <English>AI SEAD Missions:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_ENABLE_AI_SEAD_COMMENT">
+    <English>MACC flies its own suppression missions against enemy air defence. Only confirmed shooters and static SAM or AAA launchers are prosecuted, never ordinary gun vehicles, and each tasking sends two aircraft at high altitude for a short pass. If either aircraft is lost the other is recalled, the site is left alone for an hour, and the ground commander is asked to destroy it instead. Off by default - this spends aircraft.</English>
 </Key>
 <Key ID="STR_ALIVE_ATO_RESUPPLY">
     <English>Resupply:</English>

@@ -105,6 +105,25 @@ class CfgVehicles
                         tooltip = "$STR_ALIVE_ATO_AIRSPACE_COMMENT";
                         defaultValue = """""";
                 };
+                // What the commander's radar picture is built from. The airspace and
+                // air defence scans read the vehicles array, which only ever holds
+                // spawned objects - so on a virtualised battlefield most enemy air and
+                // most enemy air defence is invisible to it. "All profiles" adds a
+                // sweep of enemy vehicle profiles inside the airspace. Left on spawned
+                // aircraft only by default because the profile sweep costs time on
+                // every scan and changes what the AI commander reacts to.
+                class radarCoverage : Combo
+                {
+                        property = "ALiVE_mil_ato_radarCoverage";
+                        displayName = "$STR_ALIVE_ATO_RADAR_COVERAGE";
+                        tooltip = "$STR_ALIVE_ATO_RADAR_COVERAGE_COMMENT";
+                        defaultValue = """spawned""";
+                        class Values
+                        {
+                            class SPAWNED { name = "$STR_ALIVE_ATO_RADAR_COVERAGE_SPAWNED"; value = "spawned"; default = 1; };
+                            class PROFILES { name = "$STR_ALIVE_ATO_RADAR_COVERAGE_PROFILES"; value = "profiles"; };
+                        };
+                };
                 class createHQ : Combo
                 {
                         property = "ALiVE_mil_ato_createHQ";
@@ -162,6 +181,25 @@ class CfgVehicles
                         property = "ALiVE_mil_ato_counterAir";
                         displayName = "$STR_ALIVE_ATO_COUNTER_AIR";
                         tooltip = "$STR_ALIVE_ATO_COUNTER_AIR_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
+                // The AI SEAD sortie has been commented out of the source for years
+                // with the note that aircraft get owned by AA, so suppression was
+                // whatever players chose to do about the setting above. Turning this
+                // on flies it again, but only against air defences the commander is
+                // confident about, at standoff, and two airframes at a time - and a
+                // package that does not come back bars the target and hands it to the
+                // ground commander. Off by default: it spends aircraft.
+                class enableAISEAD : Combo
+                {
+                        property = "ALiVE_mil_ato_enableAISEAD";
+                        displayName = "$STR_ALIVE_ATO_ENABLE_AI_SEAD";
+                        tooltip = "$STR_ALIVE_ATO_ENABLE_AI_SEAD_COMMENT";
                         defaultValue = """false""";
                         class Values
                         {
