@@ -7092,6 +7092,71 @@ switch(_operation) do {
                     [_logic, format ["airspaceLast%1",_eventType],[_eventAirspace, time]] call MAINCLASS;
                 };
 
+                // A reconnaissance sortie only pays off if what it saw reaches the
+                // commander, so on completion sweep the surveyed area for enemy entity
+                // profiles and raise ATO_RECON - OPCOM consumes it through the same
+                // spotrep path a ground contact uses. Only a sortie that actually flew
+                // its loiter reports: stateData index 1 is the missionComplete flag, and
+                // an aborted or destroyed aircraft never sets it. Every read below is
+                // guarded so a malformed event falls through to the teardown untouched.
+                if (_eventType == "Recce") then {
+
+                    // isNil guarded so a console override survives a mission restart.
+                    private _reportsDisabled = if (isNil "ALiVE_ATO_disableRecceReports") then {false} else {ALiVE_ATO_disableRecceReports isEqualTo true};
+
+                    private _missionComplete = false;
+                    if (!isNil "_eventStateData" && {_eventStateData isEqualType []} && {count _eventStateData > 1}) then {
+                        _missionComplete = (_eventStateData select 1) isEqualTo true;
+                    };
+
+                    private _enemySides = [_logic,"enemySides"] call MAINCLASS;
+                    if (isNil "_enemySides") then {_enemySides = []};
+
+                    if (_missionComplete && !_reportsDisabled && {count _enemySides > 0}) then {
+
+                        // Index 5 of the event data is the position the sortie was
+                        // tasked to, written when the asset was assigned. The airspace
+                        // centre is the fallback - it is the boundary rather than the
+                        // loiter point, but it is still the right neighbourhood.
+                        private _reconPosition = [];
+                        if (count _eventData > 5) then {
+                            private _storedPosition = _eventData select 5;
+                            if (_storedPosition isEqualType [] && {count _storedPosition > 1}) then {
+                                _reconPosition = _storedPosition;
+                            };
+                        };
+                        if (count _reconPosition < 2) then {
+                            _reconPosition = getMarkerPos _eventAirspace;
+                        };
+
+                        // The sortie's own operational radius is what the aircraft
+                        // actually covered, so it bounds what it could have seen.
+                        private _reconRadius = 1000;
+                        if (!isNil "_eventRange" && {_eventRange isEqualType 0} && {_eventRange > 0}) then {
+                            _reconRadius = _eventRange;
+                        };
+
+                        private _sightedProfiles = [];
+                        {
+                            private _sightedID = _x select 2 select 4;
+                            if (!isNil "_sightedID" && {_sightedID isEqualType ""} && {_sightedID != ""}) then {
+                                _sightedProfiles pushBackUnique _sightedID;
+                            };
+                        } forEach ([_reconPosition, _reconRadius, [_enemySides,"entity"]] call ALIVE_fnc_getNearProfiles);
+
+                        if (count _sightedProfiles > 0) then {
+                            private _reconEvent = ['ATO_RECON', [_eventSide, _eventFaction, _reconPosition, _sightedProfiles],"ATO"] call ALIVE_fnc_event;
+                            [ALIVE_eventLog, "addEvent", _reconEvent] call ALIVE_fnc_eventLog;
+
+                            // DEBUG -------------------------------------------------------------------------------------
+                            if(_debug) then {
+                                ["ATO %1 - Recce reported %2 enemy profiles around %3", _logic, count _sightedProfiles, mapGridPosition _reconPosition] call ALiVE_fnc_dump;
+                            };
+                            // DEBUG -------------------------------------------------------------------------------------
+                        };
+                    };
+                };
+
                  // send radio broadcast
                 _sideObject = [_eventSide] call ALIVE_fnc_sideTextToObject;
                 _factionName = getText((_eventFaction call ALiVE_fnc_configGetFactionClass) >> "displayName");
