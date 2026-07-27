@@ -105,6 +105,25 @@ class CfgVehicles
                         tooltip = "$STR_ALIVE_ATO_AIRSPACE_COMMENT";
                         defaultValue = """""";
                 };
+                // What the commander's radar picture is built from. The airspace and
+                // air defence scans read the vehicles array, which only ever holds
+                // spawned objects - so on a virtualised battlefield most enemy air and
+                // most enemy air defence is invisible to it. "All profiles" adds a
+                // sweep of enemy vehicle profiles inside the airspace. Left on spawned
+                // aircraft only by default because the profile sweep costs time on
+                // every scan and changes what the AI commander reacts to.
+                class radarCoverage : Combo
+                {
+                        property = "ALiVE_mil_ato_radarCoverage";
+                        displayName = "$STR_ALIVE_ATO_RADAR_COVERAGE";
+                        tooltip = "$STR_ALIVE_ATO_RADAR_COVERAGE_COMMENT";
+                        defaultValue = """spawned""";
+                        class Values
+                        {
+                            class SPAWNED { name = "$STR_ALIVE_ATO_RADAR_COVERAGE_SPAWNED"; value = "spawned"; default = 1; };
+                            class PROFILES { name = "$STR_ALIVE_ATO_RADAR_COVERAGE_PROFILES"; value = "profiles"; };
+                        };
+                };
                 class createHQ : Combo
                 {
                         property = "ALiVE_mil_ato_createHQ";
