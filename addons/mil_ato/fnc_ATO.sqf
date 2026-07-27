@@ -4596,6 +4596,15 @@ switch(_operation) do {
                         // drone is put over that ground on the module's own initiative and
                         // what it sees comes back through the recce report path.
                         //
+                        // Where it goes is a question of doctrine rather than of what is
+                        // nearest, so three roles compete for the one airframe: frontline
+                        // reconnaissance over ground nobody has assessed, support orbits over
+                        // ground being fought over right now, and shadowing of enemy contacts
+                        // sitting behind the line. Shadowing takes its candidates only from
+                        // what the commander has already discovered, so it cannot become a
+                        // way of finding infiltrators - only of keeping ones already seen in
+                        // view.
+                        //
                         // Every gate below must pass, and the first is off by default, so a
                         // mission that has not asked for this behaves exactly as before.
                         // The Recce gate is also the scarcity interlock: while airframes are
@@ -4657,20 +4666,114 @@ switch(_operation) do {
                                         _logic setVariable ["isrVisited", _isrVisited];
                                     };
 
+                                    // Contacts get their own registry and a shorter cooldown
+                                    // than objectives. An objective is still where it was an
+                                    // hour later; a track is perishable, and looking at it
+                                    // again is the only thing that keeps it alive.
+                                    private _shadowVisited = _logic getVariable "shadowVisited";
+                                    if (isNil "_shadowVisited") then {
+                                        _shadowVisited = [] call ALiVE_fnc_hashCreate;
+                                        _logic setVariable ["shadowVisited", _shadowVisited];
+                                    };
+
+                                    // The commander's own intel, aged by this module. Its
+                                    // contact list carries a position but no time - the enemy
+                                    // scan rebuilds that list wholesale and prunes dead
+                                    // profiles from it, so a contact's age is written down
+                                    // nowhere. Contact ID against the last reported position,
+                                    // the time it was last in a commander's picture, and which
+                                    // commander held it. A contact still in the list has its
+                                    // stamp refreshed here; one that has dropped out keeps the
+                                    // stamp it last had, and that is what makes going cold mean
+                                    // anything at all.
+                                    private _shadowIntel = _logic getVariable "shadowIntel";
+                                    if (isNil "_shadowIntel") then {
+                                        _shadowIntel = [] call ALiVE_fnc_hashCreate;
+                                        _logic setVariable ["shadowIntel", _shadowIntel];
+                                    };
+
+                                    // How long a track survives without a fresh sighting.
+                                    // Console-tunable, read only - nothing here creates it, so
+                                    // an untouched mission uses the number below.
+                                    private _shadowStaleness = 600;
+                                    if (!isNil "ALiVE_ATO_shadowStaleness"
+                                        && {ALiVE_ATO_shadowStaleness isEqualType 0}) then {
+                                        _shadowStaleness = ALiVE_ATO_shadowStaleness;
+                                    };
+
+                                    // Role weights, per side and console-only. The Eden side of
+                                    // this feature is one switch on purpose; doctrine that needs
+                                    // a running mission to judge belongs where it can be judged.
+                                    // [frontline, support, shadow]. A weight of zero or less
+                                    // switches its role off rather than dividing by nothing.
+                                    private _isrWeights = [3,2,1];
+                                    private _isrWeightsOverride = missionNamespace getVariable (format ["ALIVE_MilATO_isrWeights_%1", toUpper _side]);
+                                    if (!isNil "_isrWeightsOverride"
+                                        && {_isrWeightsOverride isEqualType []}
+                                        && {count _isrWeightsOverride >= 3}) then {
+                                        _isrWeights = _isrWeightsOverride;
+                                    };
+                                    _isrWeights params ["_frontlineWeight","_supportWeight","_shadowWeight"];
+
+                                    // Facing an asymmetric commander there is no line to sweep -
+                                    // the enemy is already behind it - so shadowing what has
+                                    // been seen is worth a multiple of another frontline pass.
+                                    // Control type does not change over a mission but the enemy
+                                    // order of battle takes a while to exist, so this is worked
+                                    // out on the first scoring pass and then kept.
+                                    private _isrEnemyAsym = _logic getVariable "isrEnemyAsym";
+                                    if (isNil "_isrEnemyAsym") then {
+                                        private _isrEnemySides = [_logic,"enemySides"] call MAINCLASS;
+                                        if (isNil "_isrEnemySides") then {_isrEnemySides = []};
+                                        _isrEnemyAsym = ((missionNamespace getVariable ["OPCOM_instances", []]) findIf {
+                                            _x isEqualType []
+                                            && {(toUpper ([_x,"side",""] call ALiVE_fnc_hashGet)) in _isrEnemySides}
+                                            && {([_x,"controltype",""] call ALiVE_fnc_hashGet) == "asymmetric"}
+                                        }) >= 0;
+                                        _logic setVariable ["isrEnemyAsym", _isrEnemyAsym];
+                                    };
+
+                                    if (_isrEnemyAsym) then {
+                                        private _shadowAsymMultiplier = 3;
+                                        if (!isNil "ALiVE_ATO_shadowAsymMultiplier"
+                                            && {ALiVE_ATO_shadowAsymMultiplier isEqualType 0}) then {
+                                            _shadowAsymMultiplier = ALiVE_ATO_shadowAsymMultiplier;
+                                        };
+                                        _shadowWeight = _shadowWeight * _shadowAsymMultiplier;
+                                    };
+
                                     // Read the objectives through the commander handles kept
                                     // at startup rather than a copy, so danger and state are
                                     // whatever they are now.
                                     //
-                                    // Two things are worth looking at: ground nobody has
-                                    // assessed (danger -1, the value objectives start at and
-                                    // are reset to), and ground a commander is currently
-                                    // fighting over. The in-progress states are gerunds -
-                                    // "attacking", "defending" - and matching "attack" or
-                                    // "defend" here would silently never fire.
-                                    private _bestObjective = [];
+                                    // One pool, three roles, and the role decides the weight
+                                    // rather than the ordering: the recency score is the one
+                                    // this always used - unscouted ground at zero, everything
+                                    // else a million, plus the time it was last looked at,
+                                    // lower wins - and the weight divides it, so a heavier role
+                                    // reaches a lower number from the same recency and is
+                                    // picked sooner. Ground nobody has assessed (danger -1, the
+                                    // value objectives start at and are reset to) is the
+                                    // frontline role; ground a commander is fighting over right
+                                    // now is the support role, where the drone's own recce
+                                    // report keeps the contact picture fresh for the artillery
+                                    // and air levers to fan out from. One flavour each, so an
+                                    // objective never competes with itself. The in-progress
+                                    // states are gerunds - "attacking", "defending" - and
+                                    // matching "attack" or "defend" here would silently never
+                                    // fire.
+                                    private _bestCandidate = [];
                                     private _bestScore = -1;
+                                    private _heldByOpcom = [];
                                     {
-                                        private _opcomObjectives = [_x,"objectives",[]] call ALiVE_fnc_hashGet;
+                                        private _opcom = _x;
+                                        private _opcomIndex = _forEachIndex;
+                                        private _opcomObjectives = [_opcom,"objectives",[]] call ALiVE_fnc_hashGet;
+
+                                        // Ground this commander holds, collected on the way
+                                        // past for the behind-the-line test below.
+                                        private _heldCentres = [];
+
                                         {
                                             private _objective = _x;
                                             private _objectiveID = [_objective,"objectiveID",""] call ALiVE_fnc_hashGet;
@@ -4680,33 +4783,166 @@ switch(_operation) do {
                                             private _contested = _opcomState in ["attacking","defending"];
                                             private _lastVisit = [_isrVisited,_objectiveID,0] call ALiVE_fnc_hashGet;
 
+                                            // There is no side or owner on an objective - the
+                                            // fields are the ID, centre, size, type, priority,
+                                            // state and orders - so the state is the only
+                                            // ownership signal there is. These three are the
+                                            // ones the commander itself treats as rear area
+                                            // when it looks for somewhere to stage
+                                            // reinforcements from, which is the same question
+                                            // being asked here. The occupation scan sets
+                                            // "reserve" on exactly those objectives where it
+                                            // found friendlies and no enemies, and the gerund
+                                            // and idle forms are the same ground once the
+                                            // commander has acted on it. "unassigned" is
+                                            // deliberately not among them: it means nothing is
+                                            // assigned and the danger rating has been wiped,
+                                            // which is unknown ground, not held ground.
+                                            if (_opcomState in ["reserve","reserving","idle"]) then {
+                                                private _heldCentre = [_objective,"center",[]] call ALiVE_fnc_hashGet;
+                                                if (_heldCentre isEqualType [] && {count _heldCentre > 1}) then {
+                                                    _heldCentres pushBack _heldCentre;
+                                                };
+                                            };
+
+                                            private _roleWeight = -1;
+                                            private _roleName = "";
+                                            private _recency = 0;
+                                            if (_unscouted) then {
+                                                _roleWeight = _frontlineWeight;
+                                                _roleName = "frontline";
+                                                _recency = _lastVisit;
+                                            } else {
+                                                if (_contested) then {
+                                                    _roleWeight = _supportWeight;
+                                                    _roleName = "support";
+                                                    _recency = 1000000 + _lastVisit;
+                                                };
+                                            };
+
                                             if (_objectiveID != ""
-                                                && {_unscouted || _contested}
+                                                && {_roleWeight > 0}
                                                 && {_lastVisit == 0 || {(time - _lastVisit) > 1800}}) then {
-                                                // Unscouted ground first, then whatever has gone
-                                                // longest without a look. Lower score wins.
-                                                private _score = (if (_unscouted) then {0} else {1000000}) + _lastVisit;
+                                                private _score = _recency / _roleWeight;
                                                 if (_bestScore < 0 || {_score < _bestScore}) then {
                                                     _bestScore = _score;
-                                                    _bestObjective = [_objectiveID, [_objective,"center",[]] call ALiVE_fnc_hashGet, [_objective,"size",200] call ALiVE_fnc_hashGet];
+                                                    _bestCandidate = [_roleName, _objectiveID, [_objective,"center",[]] call ALiVE_fnc_hashGet, [_objective,"size",200] call ALiVE_fnc_hashGet];
                                                 };
                                             };
                                         } forEach _opcomObjectives;
+
+                                        _heldByOpcom pushBack _heldCentres;
+
+                                        // Refresh the intel registry from what this commander
+                                        // knows right now. Its contact list entries are
+                                        // [profile ID, position]; the entities it has called
+                                        // fire on are [profile ID, position, section, time] and
+                                        // carry their own, better stamp, so the newer of the two
+                                        // wins. Nothing here reaches into the profile handler
+                                        // for a list of enemies - an infiltrator nobody has
+                                        // spotted does not exist to this system, which is the
+                                        // whole of the role's point.
+                                        {
+                                            if (_x isEqualType [] && {count _x > 1} && {(_x select 0) isEqualType ""}) then {
+                                                private _existing = [_shadowIntel, _x select 0, []] call ALiVE_fnc_hashGet;
+                                                if (count _existing < 2 || {(_existing select 1) <= time}) then {
+                                                    [_shadowIntel, _x select 0, [_x select 1, time, _opcomIndex]] call ALiVE_fnc_hashSet;
+                                                };
+                                            };
+                                        } forEach ([_opcom,"knownentities",[]] call ALiVE_fnc_hashGet);
+
+                                        {
+                                            if (_x isEqualType [] && {count _x > 3} && {(_x select 0) isEqualType ""}) then {
+                                                private _existing = [_shadowIntel, _x select 0, []] call ALiVE_fnc_hashGet;
+                                                if (count _existing < 2 || {(_existing select 1) <= (_x select 3)}) then {
+                                                    [_shadowIntel, _x select 0, [_x select 1, _x select 3, _opcomIndex]] call ALiVE_fnc_hashSet;
+                                                };
+                                            };
+                                        } forEach ([_opcom,"attackedentities",[]] call ALiVE_fnc_hashGet);
                                     } forEach (_logic getVariable ["syncedOPCOMs", []]);
 
-                                    if (count _bestObjective > 0) then {
-                                        _bestObjective params ["_isrID","_isrCenter","_isrSize"];
+                                    // Now the tracks, scored into the same pool. Still fresh,
+                                    // still behind the line, and not just looked at.
+                                    private _shadowStale = [];
+                                    {
+                                        private _contactID = _x;
+                                        private _intel = [_shadowIntel,_contactID,[]] call ALiVE_fnc_hashGet;
+                                        if (count _intel > 2) then {
+                                            _intel params ["_contactPos","_contactTime","_contactOpcom"];
 
-                                        // A building at the objective, not an empty target
-                                        // list. Sortie assignment reads the loiter point off
-                                        // the first target and only falls back to the airspace
-                                        // centre for a patrol, so a recce with no target flies
-                                        // over its own airfield. Same approach the ground
-                                        // commander's own recce request takes.
+                                            // Gone cold. A track this long without a fresh
+                                            // sighting is dropped outright rather than followed
+                                            // on faith, so a contact that evades re-detection
+                                            // escapes instead of being chased by a drone with no
+                                            // business knowing where it went.
+                                            if ((time - _contactTime) > _shadowStaleness) then {
+                                                _shadowStale pushBack _contactID;
+                                            } else {
+                                                // Behind the line: within 1500m of ground the
+                                                // same commander holds. A contact out in front
+                                                // of its own held ground is the frontline role's
+                                                // business, not this one's.
+                                                private _heldCentres = _heldByOpcom param [_contactOpcom, []];
+                                                private _behindLine = _contactPos isEqualType []
+                                                    && {count _contactPos > 1}
+                                                    && {(_heldCentres findIf {_x distance2D _contactPos < 1500}) >= 0};
+                                                private _lastShadow = [_shadowVisited,_contactID,0] call ALiVE_fnc_hashGet;
+
+                                                if (_behindLine
+                                                    && {_shadowWeight > 0}
+                                                    && {_lastShadow == 0 || {(time - _lastShadow) > 900}}) then {
+                                                    private _score = (1000000 + _lastShadow) / _shadowWeight;
+                                                    if (_bestScore < 0 || {_score < _bestScore}) then {
+                                                        _bestScore = _score;
+                                                        // The last reported position, never the
+                                                        // profile's live one. Shadowing what the
+                                                        // commander actually knows is the rule;
+                                                        // reading the target's real position
+                                                        // would be this module cheating on a
+                                                        // moving target.
+                                                        _bestCandidate = ["shadow", _contactID, _contactPos, 0];
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    } forEach (+(_shadowIntel select 1));
+
+                                    {
+                                        [_shadowIntel, _x] call ALiVE_fnc_hashRem;
+                                    } forEach _shadowStale;
+
+                                    if (count _bestCandidate > 0) then {
+                                        _bestCandidate params ["_isrRole","_isrID","_isrCenter","_isrSize"];
+
                                         private _isrTargets = [];
-                                        private _isrBuildings = nearestObjects [_isrCenter, ["House_F"], _isrSize max 200];
-                                        if (count _isrBuildings > 0) then {
-                                            _isrTargets = [_isrBuildings select 0];
+                                        private _isrRadius = 1000;
+                                        private _isrDuration = 15;
+
+                                        if (_isrRole == "shadow") then {
+                                            // The contact itself is the target - the request
+                                            // pipeline resolves a profile ID to a position -
+                                            // and the sortie is shorter and tighter than a
+                                            // sweep, because it is looking at one thing rather
+                                            // than covering ground, and the track it is flying
+                                            // out to will not be worth much for long. Nothing
+                                            // re-issues it either: the next cycle will pick the
+                                            // contact again for as long as it stays fresh, and
+                                            // this drone's own recce report is part of what
+                                            // keeps it that way.
+                                            _isrTargets = [_isrID];
+                                            _isrRadius = 600;
+                                            _isrDuration = 8;
+                                        } else {
+                                            // A building at the objective, not an empty target
+                                            // list. Sortie assignment reads the loiter point off
+                                            // the first target and only falls back to the airspace
+                                            // centre for a patrol, so a recce with no target flies
+                                            // over its own airfield. Same approach the ground
+                                            // commander's own recce request takes.
+                                            private _isrBuildings = nearestObjects [_isrCenter, ["House_F"], _isrSize max 200];
+                                            if (count _isrBuildings > 0) then {
+                                                _isrTargets = [_isrBuildings select 0];
+                                            };
                                         };
 
                                         if (count _isrTargets > 0) then {
@@ -4719,8 +4955,8 @@ switch(_operation) do {
                                                 "NORMAL",           // SPEED MODE
                                                 0.1,                // MIN WEAPON STATE
                                                 0.75,               // MIN FUEL STATE
-                                                1000,               // RADIUS
-                                                15,                 // DURATION in minutes
+                                                _isrRadius,         // RADIUS
+                                                _isrDuration,       // DURATION in minutes
                                                 _isrTargets         // TARGETS
                                             ];
                                             private _isrEvent = ['ATO_REQUEST', ["Recce", _side, _faction, _isrCenter, _isrArgs],"ATO"] call ALIVE_fnc_event;
@@ -4729,12 +4965,17 @@ switch(_operation) do {
                                             // Stamped on request, not on completion: a sortie
                                             // that never launches must still move the sweep on,
                                             // or a single unreachable objective would be picked
-                                            // again on every pass forever.
-                                            [_isrVisited, _isrID, time] call ALiVE_fnc_hashSet;
+                                            // again on every pass forever. Tracks are stamped in
+                                            // their own registry, on a shorter cooldown.
+                                            if (_isrRole == "shadow") then {
+                                                [_shadowVisited, _isrID, time] call ALiVE_fnc_hashSet;
+                                            } else {
+                                                [_isrVisited, _isrID, time] call ALiVE_fnc_hashSet;
+                                            };
 
                                             // DEBUG -------------------------------------------------------------------------------------
                                             if(_debug) then {
-                                                ["ATO %1 - Drone ISR tasked over objective %2 at %3", _logic, _isrID, mapGridPosition _isrCenter] call ALiVE_fnc_dump;
+                                                ["ATO %1 - Drone ISR (%2) tasked on %3 at %4", _logic, _isrRole, _isrID, mapGridPosition _isrCenter] call ALiVE_fnc_dump;
                                             };
                                             // DEBUG -------------------------------------------------------------------------------------
                                         };
