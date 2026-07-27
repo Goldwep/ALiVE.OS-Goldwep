@@ -1035,13 +1035,25 @@ switch (_operation) do {
 
             if (!isnil "_rtb" && {["ALiVE_mil_ATO"] call ALiVE_fnc_IsModuleAvailable}) exitwith {
 
+                // the "air" QRF class covers planes, helicopters and tanks, so the
+                // target is classified from its own vehicle profile rather than the
+                // class. Only a Plane raises DCA, and only when this side's ATO
+                // module published the counter-air lever - factions with no Fighter
+                // airframe answer DCA with a denial and no fallback sortie.
                 _ATOtype = "CAS";
+                private _ATOalt = 200;
+                if (missionNamespace getVariable [format ["ALIVE_MilATO_counterAir_%1", toUpper _side], false]
+                    && {!isnil "_vehicleProfile"}
+                    && {tolower ([_vehicleProfile,"objectType",""] call ALIVE_fnc_hashGet) == "plane"}) then {
+                    _ATOtype = "DCA";
+                    _ATOalt = 750;  // interception altitude, not a strafing run
+                };
 
                 // ["Calling ATO event"] call ALiVE_fnc_DumpR;
 
                 _args = [
                     "RED",	// ROE
-                    200,
+                    _ATOalt,
                     "FULL",
                     0.1,
                     0.1,
