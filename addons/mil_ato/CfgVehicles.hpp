@@ -153,6 +153,41 @@ class CfgVehicles
                             class Yes { name = "Yes"; value = true; };
                         };
                 };
+                // Off by default: DCA needs a Fighter-role airframe, and a faction
+                // that catalogues none answers an interception request with a silent
+                // denial and no fallback. Only the target's own profile decides -
+                // helicopters and ground contacts keep CAS either way.
+                class counterAir : Combo
+                {
+                        property = "ALiVE_mil_ato_counterAir";
+                        displayName = "$STR_ALIVE_ATO_COUNTER_AIR";
+                        tooltip = "$STR_ALIVE_ATO_COUNTER_AIR_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
+                // Air request rate: above Normal, a synced commander's contact
+                // response also fans sorties across its known-enemy picture
+                // instead of answering the single lead target. Default Normal
+                // keeps today's behaviour exactly. Every fanned sortie spawns
+                // its target's profile, so this is the virtualization load dial
+                // as much as the tempo one (needs OPCOM).
+                class airRequestRate : Combo
+                {
+                        property = "ALiVE_mil_ato_airRequestRate";
+                        displayName = "$STR_ALIVE_ATO_AIR_REQUESTRATE";
+                        tooltip = "$STR_ALIVE_ATO_AIR_REQUESTRATE_COMMENT";
+                        defaultValue = """NORMAL""";
+                        class Values
+                        {
+                            class Normal { name = "Normal (1 target)"; value = "NORMAL"; default = 1; };
+                            class High { name = "High (2 targets)"; value = "HIGH"; };
+                            class Surge { name = "Surge (3 targets)"; value = "SURGE"; };
+                        };
+                };
                 // Defaults to Yes. Ground forces are reinforced through the Logistics
                 // Commander as a matter of course, so air was the only arm that could
                 // only ever shrink - every loss permanent, and a commander with nothing

@@ -139,6 +139,18 @@
 <Key ID="STR_ALIVE_ATO_GENERATE_SEADTASKS_COMMENT">
     <English>MACC does not send AI aircraft against detected anti-air sites. This only creates a player Air Tasking Order for them, and needs the C2ISTAR module. Leave this off and detected anti-air is recorded but never engaged.</English>
 </Key>
+<Key ID="STR_ALIVE_ATO_COUNTER_AIR">
+    <English>Counter Air:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_COUNTER_AIR_COMMENT">
+    <English>Answers an enemy aeroplane spotted by a synced Military AI Commander with an interception sortie instead of a ground-attack one. Needs a faction with a fighter airframe - without one the request is denied and nothing flies. Helicopters and ground targets are unaffected.</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_AIR_REQUESTRATE">
+    <English>Air request rate:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_AIR_REQUESTRATE_COMMENT">
+    <English>How many known enemy contacts commanders call air on per scan. Normal keeps today's behaviour - the single contact that triggered the response. High fans up to 2 sorties per scan across the densest known contact clusters on a 300 s cooldown each; Surge up to 3 on a 180 s cooldown. Targets are classified as they are today - aeroplanes draw interception when Counter Air is on, everything else ground attack. Every fanned sortie spawns its target's profile, so raise this with the mission's virtualization budget in mind. Needs an OPCOM.</English>
+</Key>
 <Key ID="STR_ALIVE_ATO_RESUPPLY">
     <English>Resupply:</English>
     <Chinesesimp>重新补给</Chinesesimp>
