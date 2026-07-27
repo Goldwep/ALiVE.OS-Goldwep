@@ -1630,7 +1630,7 @@ switch(_operation) do {
 
             // Target could be profiled aircraft, profile AA, non-profiled AA, building, HQ
             if (_target isEqualType "") then {
-                private _targetProfile = [ALiVE_profileHandler, "getProfile", (_targets select 1)] call ALiVE_fnc_ProfileHandler;
+                private _targetProfile = [ALiVE_profileHandler, "getProfile", _target] call ALiVE_fnc_ProfileHandler;
                 if !(isNil "_targetProfile") then {
                     _destination = [_targetProfile,"position"] call ALiVE_fnc_hashGet;
                     _enemyFaction = [_targetProfile,"faction"] call ALiVE_fnc_hashGet;
