@@ -6570,8 +6570,8 @@ switch(_operation) do {
                 if(_missionComplete || _healthIssue) then {
 
                     // return home
-                    private _eventStateData set [0, _healthIssue];
-                    private _eventStateData set [1, _missionComplete];
+                    _eventStateData set [0, _healthIssue];
+                    _eventStateData set [1, _missionComplete];
                     [_event, "stateData", _eventStateData] call ALIVE_fnc_hashSet;
 
                     // Radio broadcast
