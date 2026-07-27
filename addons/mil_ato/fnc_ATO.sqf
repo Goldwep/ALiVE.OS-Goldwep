@@ -699,6 +699,23 @@ switch(_operation) do {
 
         _result = _args;
     };
+    // Air request rate: Normal / High / Surge. The Combo hands this over as a
+    // STRING, so the level is normalised and stored as one and only the
+    // resolved [sortiesPerScan, cooldownSeconds] pair is handed back. Normal
+    // resolves to [0,0], which OPCOM's fan-out stanza treats as "do nothing" -
+    // the lever is additive and default-off.
+    case "airRequestRate": {
+        private _level = _logic getVariable ["airRequestRate", _logic getVariable ["ALiVE_mil_ato_airRequestRate", "NORMAL"]];
+        if !(_level isEqualType "") then { _level = "NORMAL"; };
+        _level = toUpper _level;
+        _logic setVariable ["airRequestRate", _level];
+
+        _result = switch (_level) do {
+            case "HIGH": { [2, 300] };
+            case "SURGE": { [3, 180] };
+            default { [0, 0] };
+        };
+    };
     case "resupply": {
         if (_args isEqualType true) then {
             _logic setVariable [_operation, _args];
@@ -1760,6 +1777,11 @@ switch(_operation) do {
             // response reads this commander's setting, not another module's
             missionNamespace setVariable [format ["ALIVE_MilATO_counterAir_%1", toUpper str _side], [_logic,"counterAir", _logic getVariable ["counterAir", false]] call MAINCLASS];
 
+            // and the air request rate, resolved to [sortiesPerScan, cooldown],
+            // so OPCOM reads this commander's rate rather than another module's.
+            // Normal publishes [0,0] and the fan-out never runs.
+            missionNamespace setVariable [format ["ALIVE_MilATO_requestRate_%1", toUpper str _side], [_logic,"airRequestRate"] call MAINCLASS];
+
             [_logic, "assets",[] call ALiVE_fnc_hashCreate] call MAINCLASS;
             [_logic,"airspaceAssets",[] call ALiVE_fnc_hashCreate] call MAINCLASS;
             [_logic,"runways",[] call ALiVE_fnc_hashCreate] call MAINCLASS;
@@ -1826,6 +1848,7 @@ switch(_operation) do {
                 ["ATO - Generate Tasks: %1",[_logic, "generateTasks"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Generate SEAD Tasks: %1",[_logic, "generateSEADTasks"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Counter Air: %1",[_logic, "counterAir"] call MAINCLASS] call ALiVE_fnc_dump;
+                ["ATO - Air Request Rate: %1",[_logic, "airRequestRate"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Start Position: %1",[_logic, "runwaystartpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway End Position: %1",[_logic, "runwayendpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Width: %1",[_logic, "runwaywidth"] call MAINCLASS] call ALiVE_fnc_dump;
