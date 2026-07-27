@@ -599,6 +599,7 @@ switch (_operation) do {
         private _listenerID = [ALiVE_eventLog, "addListener", [_logic, [
             "PROFILE_ATTACK_START",
             "PROFILE_ATTACK_END",
+            "ATO_SEAD_FAILED",
             "ATO_RECON"
         ]]] call ALiVE_fnc_eventLog;
         [_logic,"listenerID", _listenerID] call ALiVE_fnc_hashSet;
@@ -641,6 +642,24 @@ switch (_operation) do {
                     private _G2 = [_logic,"G2"] call ALiVE_fnc_hashGet;
                     if (!isnil "_G2") then {
                         [_G2,"removeProfileSpotreps", _targetsKilled] call ALiVE_fnc_G2;
+                    };
+                };
+            };
+
+            // The air commander has lost a SEAD package against an air defence and
+            // has barred itself from trying again, so the site stays up unless
+            // somebody else deals with it. Answer it on the ground. The target is a
+            // profile id; if it no longer resolves the thing has already died and
+            // there is nothing to send.
+            case "ATO_SEAD_FAILED": {
+                _eventData params ["_atoSide","_atoFaction","_targetProfileID"];
+
+                if (_opcomSide == _atoSide) then {
+                    if (!isnil "_targetProfileID" && {_targetProfileID isEqualType ""} && {_targetProfileID != ""}) then {
+                        private _targetProfile = [ALiVE_ProfileHandler,"getProfile",_targetProfileID] call ALiVE_fnc_ProfileHandler;
+                        if (!isnil "_targetProfile") then {
+                            [_logic,"attackentity",[_targetProfileID, 2, "armored"]] call MAINCLASS;
+                        };
                     };
                 };
             };

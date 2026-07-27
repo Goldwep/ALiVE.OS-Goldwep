@@ -188,6 +188,25 @@ class CfgVehicles
                             class Yes { name = "Yes"; value = true; };
                         };
                 };
+                // The AI SEAD sortie has been commented out of the source for years
+                // with the note that aircraft get owned by AA, so suppression was
+                // whatever players chose to do about the setting above. Turning this
+                // on flies it again, but only against air defences the commander is
+                // confident about, at standoff, and two airframes at a time - and a
+                // package that does not come back bars the target and hands it to the
+                // ground commander. Off by default: it spends aircraft.
+                class enableAISEAD : Combo
+                {
+                        property = "ALiVE_mil_ato_enableAISEAD";
+                        displayName = "$STR_ALIVE_ATO_ENABLE_AI_SEAD";
+                        tooltip = "$STR_ALIVE_ATO_ENABLE_AI_SEAD_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
                 // Air request rate: above Normal, a synced commander's contact
                 // response also fans sorties across its known-enemy picture
                 // instead of answering the single lead target. Default Normal
