@@ -61,6 +61,9 @@ Tupolov & Jman
 #define DEFAULT_MIN_WEAP_STATE 0.5
 #define DEFAULT_MIN_FUEL_STATE 0.5
 #define DEFAULT_RADAR_HEIGHT 105
+// Spawned objects only, matching what the scans could see before profiles were
+// an option at all.
+#define DEFAULT_RADAR_COVERAGE "spawned"
 #define DEFAULT_WAIT_TIME 60
 #define WAIT_TIME_CAS 10
 #define WAIT_TIME_DCA 30
@@ -890,6 +893,22 @@ switch(_operation) do {
     case "minAssetsForOffensive": {
         _result = [_logic, _operation, _args, ""] call ALIVE_fnc_OOsimpleOperation;
     };
+    // "spawned" keeps the airspace and air defence scans on the vehicles array
+    // alone, which is all they ever read; "profiles" additionally sweeps enemy
+    // vehicle profiles inside the airspace. Limited to those two values, so a
+    // typo falls back to the pre-existing behaviour rather than to nothing.
+    // A defined ALiVE_ATO_radarCoverage outranks the attribute, so coverage can
+    // be switched on a running server from the console without editing the
+    // mission. isNil guarded: the override only applies once somebody sets it.
+    case "radarCoverage": {
+        _result = [_logic,_operation,_args,DEFAULT_RADAR_COVERAGE,["spawned","profiles"]] call ALIVE_fnc_OOsimpleOperation;
+
+        if (!(_args isEqualType "") && {!isNil "ALiVE_ATO_radarCoverage"}) then {
+            if (ALiVE_ATO_radarCoverage in ["spawned","profiles"]) then {
+                _result = ALiVE_ATO_radarCoverage;
+            };
+        };
+    };
     case "objectiveObjectsChance": {
         _result = [_logic, _operation, _args, "100"] call ALIVE_fnc_OOsimpleOperation;
     };
@@ -1041,6 +1060,50 @@ switch(_operation) do {
             };
         } forEach vehicles;
 
+        // The vehicles array holds spawned objects only, so on a virtualised
+        // battlefield the sweep above sees a fraction of the enemy air picture.
+        // With radar coverage set to all profiles, sweep the profiles inside each
+        // airspace as well. getNearProfiles is radial and an airspace marker is a
+        // rectangle, so the radius has to reach the marker's corners and the inArea
+        // test puts the rectangle back.
+        if (([_logic,"radarCoverage"] call MAINCLASS) == "profiles") then {
+            private _enemySides = [_logic,"enemySides"] call MAINCLASS;
+
+            {
+                private _marker = _x;
+                private _markerSize = getMarkerSize _marker;
+                private _radius = ((_markerSize select 0) max (_markerSize select 1)) * 1.5;
+                private _nearProfiles = [getMarkerPos _marker, _radius, [_enemySides,"vehicle",["Plane","Helicopter"]]] call ALIVE_fnc_getNearProfiles;
+
+                {
+                    private _profile = _x;
+                    private _bogeyPos = [_profile,"position",[0,0,0]] call ALiVE_fnc_hashGet;
+
+                    // An active profile is a spawned aircraft that the pass above has
+                    // already reported, so report the same object rather than an id -
+                    // pushBackUnique then de-duplicates it - and read its live altitude,
+                    // because a profile's stored position only catches up on despawn. A
+                    // virtual one is reported by profile id, which the request pipeline
+                    // resolves and spawns when the interceptors arrive, and its stored
+                    // position is the only altitude there is to gate on.
+                    private _bogey = [_profile,"profileID",""] call ALiVE_fnc_hashGet;
+                    if ([_profile,"active",false] call ALiVE_fnc_hashGet) then {
+                        private _vehicle = [_profile,"vehicle",objNull] call ALiVE_fnc_hashGet;
+                        _bogey = _vehicle;
+                        if !(isNull _vehicle) then {_bogeyPos = getPosATL _vehicle};
+                    };
+
+                    private _bogeyValid = if (_bogey isEqualType objNull) then {!isNull _bogey} else {_bogey != ""};
+
+                    if (_bogeyValid && {(_bogeyPos select 2) > DEFAULT_RADAR_HEIGHT} && {_bogeyPos inArea _marker}) then {
+                        private _tmp = [_intruders, _marker, []] call ALiVE_fnc_hashGet;
+                        _tmp pushBackUnique _bogey;
+                        [_intruders, _marker, _tmp] call ALiVE_fnc_hashSet;
+                    };
+                } forEach _nearProfiles;
+            } forEach _airspace;
+        };
+
         _result = _intruders;
     };
     case "scanAirDefenses": {
@@ -1062,7 +1125,10 @@ switch(_operation) do {
             // isAntiAir, which additionally requires the vehicle to be armed.
             // isAA itself is left alone: it also feeds the virtual damage model and
             // the commander's own assignments, which are not this scan's business.
-            if ((_vehicle iskindOf "AAA_System_01_base_F" || _vehicle iskindOf "SAM_System_01_base_F" || _vehicle iskindOf "SAM_System_02_base_F" || [_vehicle] call ALiVE_fnc_isAntiAir) && {str(side _vehicle) in _enemySides}) then {
+            // The SAM base classes are the full 01-04 set that ALiVE_fnc_listFactionAAUnits
+            // already recognises; 03 and 04 were missing here, so those launchers were
+            // only ever caught by the isAntiAir fallback.
+            if ((_vehicle iskindOf "AAA_System_01_base_F" || _vehicle iskindOf "SAM_System_01_base_F" || _vehicle iskindOf "SAM_System_02_base_F" || _vehicle iskindOf "SAM_System_03_base_F" || _vehicle iskindOf "SAM_System_04_base_F" || [_vehicle] call ALiVE_fnc_isAntiAir) && {str(side _vehicle) in _enemySides}) then {
                 private _tmpAS = [_airspace,[_vehicle],{_Input0 distance (getMarkerPos _x)},"ASCEND"] call ALiVE_fnc_SortBy;
                 private _tmp = [_airDefenses, (_tmpAS select 0), []] call ALiVE_fnc_hashGet;
                 _tmp pushbackUnique _vehicle;
@@ -1076,6 +1142,70 @@ switch(_operation) do {
                 */
             };
         } forEach vehicles;
+
+        // Same blind spot as the airspace scan: a virtualised SAM site is not in the
+        // vehicles array, so the commander's SEAD picture held only whatever happened
+        // to be spawned. With radar coverage set to all profiles, sweep enemy vehicle
+        // profiles around each airspace too. Radial rather than area-filtered, because
+        // the pass above takes air defences anywhere on the map and assigns them to the
+        // nearest airspace - this keeps that, minus the map-wide sweep the profile
+        // system cannot afford on a loop that runs every couple of minutes.
+        if (([_logic,"radarCoverage"] call MAINCLASS) == "profiles") then {
+
+            // isAntiAir reads magazine and ammo configs, which is far too expensive to
+            // repeat for every profile of the same class in the same scan.
+            private _classCache = [] call ALiVE_fnc_hashCreate;
+
+            {
+                private _marker = _x;
+                private _markerSize = getMarkerSize _marker;
+                private _radius = ((_markerSize select 0) max (_markerSize select 1)) * 1.5;
+                private _nearProfiles = [getMarkerPos _marker, _radius, [_enemySides,"vehicle"]] call ALIVE_fnc_getNearProfiles;
+
+                {
+                    private _profile = _x;
+                    private _vehicleClass = [_profile,"vehicleClass",""] call ALiVE_fnc_hashGet;
+
+                    // An empty launcher shoots at nothing. The spawned pass gets this from
+                    // the engine; for a profile the crew are the entities in command of it.
+                    private _crewed = count ([_profile,"entitiesInCommandOf",[]] call ALiVE_fnc_hashGet) > 0;
+
+                    if (_crewed && {_vehicleClass != ""}) then {
+                        private _isAirDefense = [_classCache,_vehicleClass,-1] call ALiVE_fnc_hashGet;
+                        if (_isAirDefense isEqualTo -1) then {
+                            _isAirDefense = _vehicleClass iskindOf "AAA_System_01_base_F" || _vehicleClass iskindOf "SAM_System_01_base_F" || _vehicleClass iskindOf "SAM_System_02_base_F" || _vehicleClass iskindOf "SAM_System_03_base_F" || _vehicleClass iskindOf "SAM_System_04_base_F" || [_vehicleClass] call ALiVE_fnc_isAntiAir;
+                            [_classCache,_vehicleClass,_isAirDefense] call ALiVE_fnc_hashSet;
+                        };
+
+                        if (_isAirDefense) then {
+                            // Active profiles are reported as their spawned object, matching what
+                            // the pass above put in the list so pushBackUnique can drop the
+                            // repeat; virtual ones as a profile id, which the request pipeline
+                            // resolves the same way it already does for registered threats.
+                            private _target = [_profile,"profileID",""] call ALiVE_fnc_hashGet;
+                            private _position = [_profile,"position",[0,0,0]] call ALiVE_fnc_hashGet;
+
+                            if ([_profile,"active",false] call ALiVE_fnc_hashGet) then {
+                                private _vehicle = [_profile,"vehicle",objNull] call ALiVE_fnc_hashGet;
+                                if !(isNull _vehicle) then {
+                                    _target = _vehicle;
+                                    _position = getPosATL _vehicle;
+                                };
+                            };
+
+                            private _targetValid = if (_target isEqualType objNull) then {!isNull _target} else {_target != ""};
+
+                            if (_targetValid) then {
+                                private _tmpAS = [_airspace,[_position],{_Input0 distance (getMarkerPos _x)},"ASCEND"] call ALiVE_fnc_SortBy;
+                                private _tmp = [_airDefenses, (_tmpAS select 0), []] call ALiVE_fnc_hashGet;
+                                _tmp pushbackUnique _target;
+                                [_airDefenses, (_tmpAS select 0), _tmp] call ALiVE_fnc_hashSet;
+                            };
+                        };
+                    };
+                } forEach _nearProfiles;
+            } forEach _airspace;
+        };
 
         private _threats = [GVAR(threats),str(_logic),[]] call ALiVE_fnc_hashGet;
         // Check for known AA units
@@ -1826,6 +1956,7 @@ switch(_operation) do {
                 ["ATO - Generate Tasks: %1",[_logic, "generateTasks"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Generate SEAD Tasks: %1",[_logic, "generateSEADTasks"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Counter Air: %1",[_logic, "counterAir"] call MAINCLASS] call ALiVE_fnc_dump;
+                ["ATO - Radar Coverage: %1",[_logic, "radarCoverage"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Start Position: %1",[_logic, "runwaystartpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway End Position: %1",[_logic, "runwayendpos"] call MAINCLASS] call ALiVE_fnc_dump;
                 ["ATO - Runway Width: %1",[_logic, "runwaywidth"] call MAINCLASS] call ALiVE_fnc_dump;

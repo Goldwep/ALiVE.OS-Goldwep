@@ -126,6 +126,18 @@
 <Key ID="STR_ALIVE_ATO_PLACE_AIR_COMMENT">
     <English>If fewer than two armed aircraft start inside this module's airspace, extra ones are placed at the nearest airbase or helipad. Startup only - replacing later losses is what Resupply does. Has no effect on a carrier. Beware: with this off and no armed aircraft at all in the airspace, MACC never starts and nothing is tasked for the whole mission.</English>
 </Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE">
+    <English>Radar Coverage:</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE_COMMENT">
+    <English>What the air commander can see. Spawned aircraft only means the airspace and air defence scans see nothing that has not spawned in, so on a virtualised battlefield most enemy air and most enemy anti-air never registers - no interception, no SEAD picture. All profiles adds virtualised enemy aircraft and crewed air defence inside this module's airspace, at the cost of a profile sweep on every scan.</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE_SPAWNED">
+    <English>Spawned aircraft only</English>
+</Key>
+<Key ID="STR_ALIVE_ATO_RADAR_COVERAGE_PROFILES">
+    <English>All profiles</English>
+</Key>
 <Key ID="STR_ALIVE_ATO_GENERATE_TASKS">
     <English>Generate Player Tasks:</English>
     <Chinesesimp>生成玩家任务</Chinesesimp>
