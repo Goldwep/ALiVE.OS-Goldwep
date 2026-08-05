@@ -598,7 +598,9 @@ switch (_operation) do {
     
         private _listenerID = [ALiVE_eventLog, "addListener", [_logic, [
             "PROFILE_ATTACK_START",
-            "PROFILE_ATTACK_END"
+            "PROFILE_ATTACK_END",
+            "ATO_SEAD_FAILED",
+            "ATO_RECON"
         ]]] call ALiVE_fnc_eventLog;
         [_logic,"listenerID", _listenerID] call ALiVE_fnc_hashSet;
     };
@@ -621,6 +623,18 @@ switch (_operation) do {
                 };
             };
 
+            // Air reconnaissance report from a Military Air Component Commander.
+            // The side carried on the event is the side that flew the sortie, so
+            // the match keeps a friendly ATO's findings inside its own chain of
+            // command rather than handing them to every commander on the map.
+            case "ATO_RECON": {
+                _eventData params ["_reconSide","_reconFaction","_reconPosition","_sightedProfiles"];
+
+                if (_opcomSide == _reconSide) then {
+                    [_logic,"createSpotrepForProfiles", _sightedProfiles] call MAINCLASS;
+                };
+            };
+
             case "PROFILE_ATTACK_END": {
                 _eventData params ["_attackID","_attackerID","_targetsLeft","_targetsKilled","_attackPosition","_attackerSide","_timeStarted","_maxRange","_cyclesLeft"];
 
@@ -628,6 +642,24 @@ switch (_operation) do {
                     private _G2 = [_logic,"G2"] call ALiVE_fnc_hashGet;
                     if (!isnil "_G2") then {
                         [_G2,"removeProfileSpotreps", _targetsKilled] call ALiVE_fnc_G2;
+                    };
+                };
+            };
+
+            // The air commander has lost a SEAD package against an air defence and
+            // has barred itself from trying again, so the site stays up unless
+            // somebody else deals with it. Answer it on the ground. The target is a
+            // profile id; if it no longer resolves the thing has already died and
+            // there is nothing to send.
+            case "ATO_SEAD_FAILED": {
+                _eventData params ["_atoSide","_atoFaction","_targetProfileID"];
+
+                if (_opcomSide == _atoSide) then {
+                    if (!isnil "_targetProfileID" && {_targetProfileID isEqualType ""} && {_targetProfileID != ""}) then {
+                        private _targetProfile = [ALiVE_ProfileHandler,"getProfile",_targetProfileID] call ALiVE_fnc_ProfileHandler;
+                        if (!isnil "_targetProfile") then {
+                            [_logic,"attackentity",[_targetProfileID, 2, "armored"]] call MAINCLASS;
+                        };
                     };
                 };
             };
@@ -989,6 +1021,99 @@ switch (_operation) do {
             [_logic,"artyRequestedEntities",_artyReq] call ALiVE_fnc_HashSet;
         };
 
+        // the same lever for the air arm: when the mil_ATO "Air request rate"
+        // setting is above Normal it broadcasts [sortiesPerScan, cooldownSeconds]
+        // and we fan ATO_REQUESTs across the known enemy contacts as well as the
+        // single QRF target below, each contact on its own air cooldown. [0,0]
+        // (Normal, or no ATO module) skips the block entirely, so this is
+        // additive and default-off. Note the read takes the bare side string -
+        // ATO published the key with str on a side OBJECT, _side here is
+        // already a string and str would wrap it in quotes and never match.
+        private _atoRate = missionNamespace getVariable [format ["ALIVE_MilATO_requestRate_%1", toUpper _side], [0,0]];
+        if ((_atoRate select 0) > 0 && {["ALiVE_mil_ATO"] call ALiVE_fnc_IsModuleAvailable}) then {
+            private _atoMax = _atoRate select 0;
+            private _atoCd = _atoRate select 1;
+            private _atoReq = [_logic,"atoRequestedEntities",[]] call ALiVE_fnc_HashGet;
+            {
+                if ((isnil "_x") || {time - (_x select 1) > _atoCd} || {!((_x select 0) in _profileIDs)}) then {
+                    _atoReq set [_foreachIndex,"x"];
+                };
+            } forEach _atoReq;
+            _atoReq = _atoReq - ["x"];
+            private _atoCounterAir = missionNamespace getVariable [format ["ALIVE_MilATO_counterAir_%1", toUpper _side], false];
+            private _atoSideObj = [_side] call ALiVE_fnc_sideTextToObject;
+            private _atoFaction = _factions select 0;
+
+            // candidates are the known contacts not already on an air cooldown,
+            // weighted by how many known contacts sit within 200m - the same
+            // density measure the artillery request uses, so both arms converge
+            // on the clusters rather than scattering across lone stragglers
+            private _atoCands = [];
+            {
+                if (!isnil "_x" && {_x isEqualType []} && {count _x > 0}) then {
+                    private _cID = _x select 0;
+                    if (({!(isnil "_x") && {_x isEqualType []} && {(_x select 0) == _cID}} count _atoReq) < 1) then {
+                        private _cProfile = [ALiVE_ProfileHandler,"getProfile",_cID] call ALiVE_fnc_ProfileHandler;
+                        if (!isnil "_cProfile") then {
+                            private _cPos = [_cProfile,"position"] call ALiVE_fnc_HashGet;
+                            private _cContacts = ({
+                                !isnil "_x" && {_x isEqualType []} && {count _x > 0} && {
+                                    private _kP = [ALiVE_ProfileHandler,"getProfile",_x select 0] call ALiVE_fnc_ProfileHandler;
+                                    !isnil "_kP" && {([_kP,"position"] call ALiVE_fnc_HashGet) distance2D _cPos < 200}
+                                }
+                            } count _knownE);
+                            _atoCands pushBack [_cContacts, _cID, _cPos, _cProfile];
+                        };
+                    };
+                };
+            } forEach _knownE;
+
+            // densest first, up to the rate cap. Picked by explicit maximum
+            // rather than a sort so nothing rides on how nested arrays compare
+            // when two clusters weigh the same
+            private _atoFired = 0;
+            while {_atoFired < _atoMax && {count _atoCands > 0}} do {
+                private _bestIdx = 0;
+                {
+                    if ((_x select 0) > ((_atoCands select _bestIdx) select 0)) then {_bestIdx = _foreachIndex};
+                } forEach _atoCands;
+                private _best = _atoCands deleteAt _bestIdx;
+                private _cID = _best select 1;
+                private _cPos = _best select 2;
+                private _cProfile = _best select 3;
+
+                // classified exactly like the single-target sortie below: only a
+                // Plane raises DCA, and only when this side's ATO published the
+                // counter-air lever - everything else stays CAS
+                private _cATOtype = "CAS";
+                private _cATOalt = 200;
+                private _cVehicles = ([_cProfile,"vehicleAssignments",[[],[]]] call ALIVE_fnc_hashGet) select 1;
+                if (_atoCounterAir && {count _cVehicles > 0}) then {
+                    private _cVehProfile = [ALiVE_ProfileHandler,"getProfile",_cVehicles select 0] call ALiVE_fnc_ProfileHandler;
+                    if (!isnil "_cVehProfile" && {tolower ([_cVehProfile,"objectType",""] call ALIVE_fnc_hashGet) == "plane"}) then {
+                        _cATOtype = "DCA";
+                        _cATOalt = 750;  // interception altitude, not a strafing run
+                    };
+                };
+
+                private _cArgs = [
+                    "RED",	// ROE
+                    _cATOalt,
+                    "FULL",
+                    0.1,
+                    0.1,
+                    2000,	// RADIUS
+                    10,
+                    [_cID]  // TARGETS either profile or unit
+                ];
+                private _cEvent = ['ATO_REQUEST', [_cATOtype, _atoSideObj, _atoFaction, _cPos, _cArgs],"OPCOM"] call ALIVE_fnc_event;
+                [ALIVE_eventLog, "addEvent",_cEvent] call ALIVE_fnc_eventLog;
+                _atoReq pushBack [_cID, time];
+                _atoFired = _atoFired + 1;
+            };
+            [_logic,"atoRequestedEntities",_atoReq] call ALiVE_fnc_HashSet;
+        };
+
         if ({!(isnil "_x") && {_x select 0 == _target}} count _attackedE < 1) then {
 
             private _infantry = [_logic,"infantry",[]] call ALiVE_fnc_HashGet;
@@ -1037,13 +1162,25 @@ switch (_operation) do {
 
             if (!isnil "_rtb" && {["ALiVE_mil_ATO"] call ALiVE_fnc_IsModuleAvailable}) exitwith {
 
+                // the "air" QRF class covers planes, helicopters and tanks, so the
+                // target is classified from its own vehicle profile rather than the
+                // class. Only a Plane raises DCA, and only when this side's ATO
+                // module published the counter-air lever - factions with no Fighter
+                // airframe answer DCA with a denial and no fallback sortie.
                 _ATOtype = "CAS";
+                private _ATOalt = 200;
+                if (missionNamespace getVariable [format ["ALIVE_MilATO_counterAir_%1", toUpper _side], false]
+                    && {!isnil "_vehicleProfile"}
+                    && {tolower ([_vehicleProfile,"objectType",""] call ALIVE_fnc_hashGet) == "plane"}) then {
+                    _ATOtype = "DCA";
+                    _ATOalt = 750;  // interception altitude, not a strafing run
+                };
 
                 // ["Calling ATO event"] call ALiVE_fnc_DumpR;
 
                 _args = [
                     "RED",	// ROE
-                    200,
+                    _ATOalt,
                     "FULL",
                     0.1,
                     0.1,

@@ -105,6 +105,25 @@ class CfgVehicles
                         tooltip = "$STR_ALIVE_ATO_AIRSPACE_COMMENT";
                         defaultValue = """""";
                 };
+                // What the commander's radar picture is built from. The airspace and
+                // air defence scans read the vehicles array, which only ever holds
+                // spawned objects - so on a virtualised battlefield most enemy air and
+                // most enemy air defence is invisible to it. "All profiles" adds a
+                // sweep of enemy vehicle profiles inside the airspace. Left on spawned
+                // aircraft only by default because the profile sweep costs time on
+                // every scan and changes what the AI commander reacts to.
+                class radarCoverage : Combo
+                {
+                        property = "ALiVE_mil_ato_radarCoverage";
+                        displayName = "$STR_ALIVE_ATO_RADAR_COVERAGE";
+                        tooltip = "$STR_ALIVE_ATO_RADAR_COVERAGE_COMMENT";
+                        defaultValue = """spawned""";
+                        class Values
+                        {
+                            class SPAWNED { name = "$STR_ALIVE_ATO_RADAR_COVERAGE_SPAWNED"; value = "spawned"; default = 1; };
+                            class PROFILES { name = "$STR_ALIVE_ATO_RADAR_COVERAGE_PROFILES"; value = "profiles"; };
+                        };
+                };
                 class createHQ : Combo
                 {
                         property = "ALiVE_mil_ato_createHQ";
@@ -151,6 +170,60 @@ class CfgVehicles
                         {
                             class No { name = "No"; value = false; default = 1; };
                             class Yes { name = "Yes"; value = true; };
+                        };
+                };
+                // Off by default: DCA needs a Fighter-role airframe, and a faction
+                // that catalogues none answers an interception request with a silent
+                // denial and no fallback. Only the target's own profile decides -
+                // helicopters and ground contacts keep CAS either way.
+                class counterAir : Combo
+                {
+                        property = "ALiVE_mil_ato_counterAir";
+                        displayName = "$STR_ALIVE_ATO_COUNTER_AIR";
+                        tooltip = "$STR_ALIVE_ATO_COUNTER_AIR_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
+                // The AI SEAD sortie has been commented out of the source for years
+                // with the note that aircraft get owned by AA, so suppression was
+                // whatever players chose to do about the setting above. Turning this
+                // on flies it again, but only against air defences the commander is
+                // confident about, at standoff, and two airframes at a time - and a
+                // package that does not come back bars the target and hands it to the
+                // ground commander. Off by default: it spends aircraft.
+                class enableAISEAD : Combo
+                {
+                        property = "ALiVE_mil_ato_enableAISEAD";
+                        displayName = "$STR_ALIVE_ATO_ENABLE_AI_SEAD";
+                        tooltip = "$STR_ALIVE_ATO_ENABLE_AI_SEAD_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class No { name = "No"; value = false; default = 1; };
+                            class Yes { name = "Yes"; value = true; };
+                        };
+                };
+                // Air request rate: above Normal, a synced commander's contact
+                // response also fans sorties across its known-enemy picture
+                // instead of answering the single lead target. Default Normal
+                // keeps today's behaviour exactly. Every fanned sortie spawns
+                // its target's profile, so this is the virtualization load dial
+                // as much as the tempo one (needs OPCOM).
+                class airRequestRate : Combo
+                {
+                        property = "ALiVE_mil_ato_airRequestRate";
+                        displayName = "$STR_ALIVE_ATO_AIR_REQUESTRATE";
+                        tooltip = "$STR_ALIVE_ATO_AIR_REQUESTRATE_COMMENT";
+                        defaultValue = """NORMAL""";
+                        class Values
+                        {
+                            class Normal { name = "Normal (1 target)"; value = "NORMAL"; default = 1; };
+                            class High { name = "High (2 targets)"; value = "HIGH"; };
+                            class Surge { name = "Surge (3 targets)"; value = "SURGE"; };
                         };
                 };
                 // Defaults to Yes. Ground forces are reinforced through the Logistics
@@ -223,6 +296,21 @@ class CfgVehicles
                         {
                             class Yes { name = "Yes"; value = true; default = 1; };
                             class No { name = "No"; value = false; };
+                        };
+                };
+                // Off by default: this is the only setting that makes the commander
+                // task itself rather than answer a request, so it has to be asked for.
+                // Needs Use Drones on and Recce in the mission types to do anything.
+                class droneISR : Combo
+                {
+                        property = "ALiVE_mil_ato_droneISR";
+                        displayName = "$STR_ALIVE_ATO_DRONE_ISR";
+                        tooltip = "$STR_ALIVE_ATO_DRONE_ISR_COMMENT";
+                        defaultValue = """false""";
+                        class Values
+                        {
+                            class Yes { name = "Yes"; value = true; };
+                            class No { name = "No"; value = false; default = 1; };
                         };
                 };
                 // Tempo controls. Both blank by default and blank means "as before",

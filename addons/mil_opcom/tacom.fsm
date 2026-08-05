@@ -305,7 +305,7 @@ class FSM
                          "" \n
                          "                    if (_danger > 0) then {" \n
                          "                        // Request OPCOM check objective for airfield and send OCA if necessary" \n
-                         "                        _OPCOM_FSM setFSMVariable [""_OPCOM_DATA"",[""OCA"",[_objectiveID]]];" \n
+                         "                        _OPCOM_FSM setFSMVariable [""_OPCOM_DATA"",[""OCA"",[[_objective,""objectiveID"",""""] call ALiVE_fnc_HashGet]]];" \n
                          "                    };" \n
                          "                };" \n
                          "" \n
